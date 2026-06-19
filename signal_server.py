@@ -34,6 +34,11 @@ DEFAULT_ADMIN_PASSWORD = "12345"
 DEBUG = True   # Toggle verbose debug output
 _config = {"chatRetentionDays": CHAT_RETENTION_DAYS}  # mutable config for runtime changes
 _ntp_config = {"server": "stdtime.gov.hk", "offset": 0.0, "enabled": True}
+_sessions = {}  # token -> {"createdAt": timestamp}
+_login_attempts = {}  # websocket_id -> {"count": int, "first": timestamp}
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_COOLDOWN = 30  # seconds
+SESSION_TIMEOUT = 1800  # 30 minutes
 
 
 def _setup_logging():
@@ -82,10 +87,14 @@ def _init_admin_password():
         conn.close()
 
 def _verify_admin_password(pw):
+    """Constant-time password comparison to prevent timing attacks."""
+    import hmac
     conn = sqlite3.connect(DB_PATH)
     try:
         row = conn.execute("SELECT value FROM admin WHERE key='password'").fetchone()
-        return row and row[0] == _hash_password(pw)
+        if not row:
+            return False
+        return hmac.compare_digest(_hash_password(pw), row[0])
     finally:
         conn.close()
 
@@ -97,6 +106,35 @@ def _set_admin_password(new_pw):
         return True
     finally:
         conn.close()
+
+def _generate_session():
+    """Generate a secure random session token."""
+    token = secrets.token_hex(32)
+    _sessions[token] = {"createdAt": time.time()}
+    return token
+
+def _verify_session(token):
+    """Verify session token and check expiry."""
+    if not token:
+        return False
+    entry = _sessions.get(token)
+    if not entry:
+        return False
+    if time.time() - entry["createdAt"] > SESSION_TIMEOUT:
+        _sessions.pop(token, None)
+        return False
+    return True
+
+def _check_login_rate(ws_id):
+    """Rate limit logins: max 5 attempts per 30 seconds per connection."""
+    now = time.time()
+    entry = _login_attempts.get(ws_id, {"count": 0, "first": now})
+    if now - entry["first"] > LOGIN_COOLDOWN:
+        entry["count"] = 0
+        entry["first"] = now
+    entry["count"] += 1
+    _login_attempts[ws_id] = entry
+    return entry["count"] <= MAX_LOGIN_ATTEMPTS
 
 def _get_logs(count=50):
     """Return the last N lines from today's log file."""
@@ -738,7 +776,7 @@ async def handler(websocket):
                     pass
 
             elif msg_type == "ntp-config":
-                if not _verify_admin_password(data.get("password", "")):
+                if not _verify_session(data.get("token", "")):
                     await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
                     continue
                 if "ntpServer" in data:
@@ -823,12 +861,20 @@ async def handler(websocket):
                         pass
 
             elif msg_type == "admin-login":
+                # Rate limit check
+                ws_id = str(websocket.remote_address) if hasattr(websocket, "remote_address") else str(id(websocket))
+                if not _check_login_rate(ws_id):
+                    await websocket.send(json.dumps({"type": "admin-login-result", "success": False, "message": "登入嘗試過於頻繁，請 30 秒後再試"}))
+                    _log("ADMIN", f"Rate limit hit for {ws_id}")
+                    continue
                 pw = data.get("password", "")
                 if _verify_admin_password(pw):
+                    token = _generate_session()
                     await websocket.send(json.dumps({
                         "type": "admin-login-result",
                         "success": True,
                         "message": "Authenticated",
+                        "token": token,
                         "serverInfo": {
                             "version": "1.1.0",
                             "uptime": int(time.time() - _start_time) if hasattr(_log, '_start') else 0,
@@ -848,7 +894,7 @@ async def handler(websocket):
                     _log('ADMIN', f'{my_peer_id} login FAILED')
 
             elif msg_type == "admin-logs":
-                if not _verify_admin_password(data.get("password", "")):
+                if not _verify_session(data.get("token", "")):
                     await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
                     continue
                 count = data.get("count", 50)
@@ -856,7 +902,7 @@ async def handler(websocket):
                 await websocket.send(json.dumps({"type": "admin-logs-result", "logs": logs}))
 
             elif msg_type == "admin-log-download":
-                if not _verify_admin_password(data.get("password", "")):
+                if not _verify_session(data.get("token", "")):
                     await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
                     continue
                 today_log = os.path.join(LOG_DIR, f"clipper_{datetime.now().strftime('%Y%m%d')}.log")
@@ -881,7 +927,7 @@ async def handler(websocket):
                 _log('ADMIN', f'{my_peer_id} changed password')
 
             elif msg_type == "admin-get-config":
-                if not _verify_admin_password(data.get("password", "")):
+                if not _verify_session(data.get("token", "")):
                     await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
                     continue
                 await websocket.send(json.dumps({
@@ -899,7 +945,7 @@ async def handler(websocket):
                 }))
 
             elif msg_type == "admin-set-config":
-                if not _verify_admin_password(data.get("password", "")):
+                if not _verify_session(data.get("token", "")):
                     await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
                     continue
                 cfg = data.get("config", {})
@@ -910,7 +956,7 @@ async def handler(websocket):
                 _log('ADMIN', f'{my_peer_id} updated server config')
 
             elif msg_type == "admin-export":
-                if not _verify_admin_password(data.get("password", "")):
+                if not _verify_session(data.get("token", "")):
                     await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
                     continue
                 dump_data = {
@@ -927,7 +973,7 @@ async def handler(websocket):
                 _log('ADMIN', f'{my_peer_id} exported config dump ({len(room_data)} rooms)')
 
             elif msg_type == "admin-import":
-                if not _verify_admin_password(data.get("password", "")):
+                if not _verify_session(data.get("token", "")):
                     await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
                     continue
                 dump_raw = data.get("dump", "")
