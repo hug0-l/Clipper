@@ -552,6 +552,20 @@ async def handler(websocket):
                     "room": rid,
                 }))
 
+            elif msg_type == "relay-data":
+                rid = data.get("room")
+                target = data.get("to")
+                payload = data.get("data", {})
+                if not rid or rid not in rooms or not target or target not in rooms[rid]:
+                    await websocket.send(json.dumps({"type": "error", "message": "relay target not found"}))
+                    continue
+                out = {"type": "relay-data", "from": my_peer_id, "data": payload}
+                try:
+                    await rooms[rid][target]["ws"].send(json.dumps(out))
+                    _debug(f"→ TX relay-data to={target} from={my_peer_id} ({payload.get('type','?')})")
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+
             elif msg_type == "dump":
                 iso_ts = datetime.now(timezone.utc).isoformat()
                 rooms_diag = {}

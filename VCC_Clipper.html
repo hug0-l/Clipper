@@ -398,6 +398,8 @@ footer input[type="text"] {
 .file-no-target {
     font-size:13px; color:#ef4444; padding:6px 0; text-align:center;
 }
+.settings-container { max-width:500px; margin:0 auto; }
+.settings-section { /* inherits from parent */ }
 .sync-status {
     font-size:12px; white-space:nowrap;
 }
@@ -769,6 +771,7 @@ footer input[type="text"] {
     <button class="tab-btn" data-target="filetransfer">📁 檔案傳輸</button>
     <button class="tab-btn" data-target="noticeboard">📋 公告欄</button>
     <button class="tab-btn" data-target="checklist">✅ 檢查清單</button>
+    <button class="tab-btn" data-target="settings">⚙️ 設定</button>
     <button class="tab-btn" data-target="about">ℹ️ 關於</button>
     <div class="tab-spacer"></div>
 </nav>
@@ -822,7 +825,42 @@ footer input[type="text"] {
             <div class="checklist-v2-boards" id="checklistBoards"></div>
         </div>
     </section>
-<section class="tab-pane" data-tab="about">
+<section class="tab-pane" data-tab="settings">
+        <div class="settings-container">
+            <h2 style="font-size:22px;font-weight:600;margin-bottom:20px;">⚙️ 設定</h2>
+            <div class="settings-section">
+                <h3 style="font-size:18px;font-weight:500;margin-bottom:12px;">📡 傳輸模式</h3>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <div style="display:flex;justify-content:space-between;padding:8px 12px;background:#1e293b;border-radius:8px;">
+                        <span style="color:#94a3b8;">目前模式</span>
+                        <span id="transportMode" style="font-weight:500;">---</span>
+                    </div>
+                    <div style="padding:8px 12px;background:#1e293b;border-radius:8px;">
+                        <div style="color:#94a3b8;margin-bottom:6px;">各用戶連線</div>
+                        <div id="peerTransportDetail" style="font-size:14px;"></div>
+                    </div>
+                    <div style="padding:8px 12px;background:#1e293b;border-radius:8px;font-size:13px;color:#64748b;line-height:1.6;">
+                        <p>🟢 P2P (WebRTC) — 最優先，點對點直連，低延遲</p>
+                        <p>🟡 中繼 (WS Relay) — WebRTC 失敗時透過伺服器中繼</p>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-section" style="margin-top:20px;">
+                <h3 style="font-size:18px;font-weight:500;margin-bottom:12px;">💾 資料</h3>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <div style="display:flex;justify-content:space-between;padding:8px 12px;background:#1e293b;border-radius:8px;">
+                        <span style="color:#94a3b8;">最後同步</span>
+                        <span id="settingsLastSync" style="font-weight:500;">---</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:8px 12px;background:#1e293b;border-radius:8px;">
+                        <span style="color:#94a3b8;">房間代碼</span>
+                        <span id="settingsRoomCode" style="font-weight:500;color:#38bdf8;">---</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <section class="tab-pane" data-tab="about">
         <div style="max-width:500px;margin:0 auto;">
             <h2 style="font-size:25px;font-weight:600;margin-bottom:12px;">關於 VCC Clipper</h2>
             <p style="color:#94a3b8;margin-bottom:20px;line-height:1.7;">
@@ -925,6 +963,7 @@ const APP = {
         if (typeof updatePeerTargetUI === 'function') {
             updatePeerTargetUI();
         }
+        updateTransportUI();
     },
     updateSyncStatus() {
         const el = document.getElementById('syncStatus');
@@ -1562,6 +1601,21 @@ function handleWsMessage(data) {
         case 'dump-result':
             console.log('=== Server Dump ===', JSON.stringify(data, null, 2));
             APP.showStatusMsg('🔍 伺服器資料已輸出到開發者主控台');
+            break;
+
+        case 'relay-data':
+            // Incoming relayed message from another peer via server
+            if (data.data && data.data.type === 'chat') {
+                appendChatMessage(data.data.from, data.data.text, data.data.timestamp);
+            } else if (data.data && data.data.type === 'file-meta') {
+                handleFileMeta(data.data, data.from);
+            } else if (data.data && data.data.type === 'file-done') {
+                handleFileDone(data.data, data.from);
+            }
+            // Mark this peer as relay mode (file chunks use DC only)
+            const relayPeer = APP.state.peers.get(data.from);
+            if (relayPeer) relayPeer.relay = true;
+            updateTransportUI();
             break;
 
         case 'room_peers':
@@ -2579,27 +2633,68 @@ function markAllFailed() {
     updateFileUI();
 }
 
+// ========== Transport: WebRTC DC with WS Relay Fallback ==========
+function getPeerTransport(pid) {
+    const ps = APP.state.peers.get(pid);
+    if (!ps) return 'unknown';
+    if (ps.dc && ps.dc.readyState === 'open') return 'p2p';
+    return ps.relay ? 'relay' : 'p2p-failed';
+}
+function updateTransportUI() {
+    const el = document.getElementById('transportMode');
+    if (!el) return;
+    if (!APP.state.connected) { el.textContent = '---'; return; }
+    const ps = [...APP.state.peers.keys()];
+    if (ps.length === 0) { el.textContent = '🟡 等待其他用戶'; return; }
+    const modes = ps.map(pid => getPeerTransport(pid));
+    const allP2P = modes.every(m => m === 'p2p');
+    const anyRelay = modes.some(m => m === 'relay');
+    if (allP2P) { el.innerHTML = '🟢 P2P (WebRTC)'; el.style.color = '#22c55e'; }
+    else if (anyRelay) { el.innerHTML = '🟡 中繼 (WS Relay)'; el.style.color = '#f59e0b'; }
+    else { el.innerHTML = '🔴 連線失敗'; el.style.color = '#ef4444'; }
+    // Per-peer detail
+    const detail = document.getElementById('peerTransportDetail');
+    if (detail) {
+        detail.innerHTML = ps.map(pid => {
+            const m = getPeerTransport(pid);
+            const name = APP.state.peerNames.get(pid) || pid;
+            const icon = m === 'p2p' ? '🟢' : m === 'relay' ? '🟡' : '🔴';
+            return '<div>' + icon + ' ' + escapeHtml(name) + '：<span style="color:#94a3b8">' + m + '</span></div>';
+        }).join('');
+    }
+}
+
+function sendToPeerDC(pid, jsonStr) {
+    const ps = APP.state.peers.get(pid);
+    if (ps && ps.dc && ps.dc.readyState === 'open') {
+        try { ps.dc.send(jsonStr); return true; } catch (_) {}
+    }
+    return false;
+}
+function relayToPeer(pid, jsonStr) {
+    if (!APP.state.connected || !APP.state.room) return false;
+    let payload;
+    try { payload = JSON.parse(jsonStr); } catch (_) { payload = { raw: jsonStr }; }
+    sendWsMessage({type: 'relay-data', room: APP.state.room, to: pid, data: payload});
+    return true;
+}
+function relayToPeers(jsonStr, peerIds) {
+    for (const pid of peerIds) relayToPeer(pid, jsonStr);
+}
+
 function broadcastToPeers(jsonStr) {
-    for (const peerState of APP.state.peers.values()) {
-        if (peerState.dc && peerState.dc.readyState === 'open') {
-            try {
-                peerState.dc.send(jsonStr);
-            } catch (e) {
-                console.error('[Broadcast] send error', e);
-            }
+    for (const pid of APP.state.peers.keys()) {
+        if (!sendToPeerDC(pid, jsonStr)) {
+            // DC failed or not open → fallback to relay
+            relayToPeer(pid, jsonStr);
         }
     }
 }
 
 function sendToPeers(jsonStr, peerIds) {
     for (const pid of peerIds) {
-        const peerState = APP.state.peers.get(pid);
-        if (peerState && peerState.dc && peerState.dc.readyState === 'open') {
-            try {
-                peerState.dc.send(jsonStr);
-            } catch (e) {
-                console.error('[SendTo] send error', e);
-            }
+        if (!sendToPeerDC(pid, jsonStr)) {
+            relayToPeer(pid, jsonStr);
         }
     }
 }
@@ -2940,6 +3035,28 @@ renderNoticeBoard();
 document.getElementById('btnNewPost').addEventListener('click', () => {
     showNoticeForm();
 });
+
+// ========== Settings Tab Watcher ==========
+function updateSettingsView() {
+    const syncEl = document.getElementById('settingsLastSync');
+    const roomEl = document.getElementById('settingsRoomCode');
+    if (syncEl) {
+        if (APP.state.lastSyncTime) {
+            const ago = Math.floor((Date.now() - APP.state.lastSyncTime) / 1000);
+            if (ago < 60) syncEl.textContent = '剛剛同步';
+            else if (ago < 3600) syncEl.textContent = Math.floor(ago / 60) + ' 分鐘前';
+            else syncEl.textContent = Math.floor(ago / 3600) + ' 小時前';
+        } else {
+            syncEl.textContent = APP.state.connected ? '未同步' : '---';
+        }
+    }
+    if (roomEl) roomEl.textContent = APP.state.room || '---';
+}
+// Update settings view every 2 seconds
+setInterval(() => {
+    updateSettingsView();
+    updateTransportUI();
+}, 2000);
 
 // ========== Debug Dump ==========
 document.getElementById('btnDump')?.addEventListener('click', () => {
