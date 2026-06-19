@@ -197,8 +197,16 @@ main {
     font-size: 9px;
 }
 .notice-sidebar .notice-card .notice-card-content {
-    font-size: 13px;
+    font-size: 12px;
+    color: #94a3b8;
     margin-top: 4px;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 .notice-sidebar .notice-card .btn-icon {
     font-size: 12px;
@@ -1370,6 +1378,7 @@ function renderNoticeBoard() {
                 + '</div>'
                 + '<div class="notice-card-meta" style="font-size:11px;margin-bottom:2px;">' + escapeHtml(post.author) + ' · ' + timeStr + '</div>'
                 + (tagsHtml ? '<div class="notice-card-meta">' + tagsHtml + '</div>' : '')
+                + '<div class="notice-card-content">' + post.content + '</div>'
                 + '</div>';
         }).join('');
     }
@@ -1476,6 +1485,7 @@ function renderNoticeBoardSidebar() {
             + (post.pinned ? '<span style="font-size:12px;">📌</span>' : '')
             + '</div>'
             + '<div style="font-size:11px;color:#64748b;">' + escapeHtml(post.author) + ' · ' + timeStr + '</div>'
+            + '<div class="notice-card-content">' + post.content + '</div>'
             + '</div>';
     }).join('');
 }
