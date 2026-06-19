@@ -206,8 +206,6 @@ main {
 }
 @media (min-width: 951px) {
     .notice-sidebar { display: flex; }
-    /* Hide noticeboard tab pane when sidebar is visible (avoids duplication) */
-    .tab-pane[data-tab="noticeboard"] { display: none !important; }
 }
 @media (max-width: 950px) {
     .notice-sidebar { display: none; }
@@ -661,6 +659,40 @@ footer input[type="text"] {
     padding-top: 8px;
     border-top: 1px solid #334155;
 }
+
+/* --- CMS Notice Management --- */
+.cms-container { max-width: 960px; margin: 0 auto; display:flex; flex-direction:column; flex:1; }
+.cms-header h2 { font-size:22px; font-weight:600; margin-bottom:12px; }
+.cms-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+.cms-search { flex:1; min-width:150px; background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:8px 12px; border-radius:8px; font-size:15px; outline:none; font-family:inherit; }
+.cms-search:focus { border-color:#38bdf8; }
+.cms-filter { background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:8px 12px; border-radius:8px; font-size:14px; outline:none; font-family:inherit; cursor:pointer; }
+.cms-filter:focus { border-color:#38bdf8; }
+.cms-stats-bar { display:flex; gap:16px; padding:8px 12px; background:#111827; border-radius:8px; margin-bottom:12px; font-size:14px; color:#94a3b8; }
+.cms-stats-bar strong { color:#e2e8f0; }
+.cms-table-wrap { overflow-x:auto; flex:1; }
+.cms-table { width:100%; border-collapse:collapse; font-size:14px; }
+.cms-table thead th { background:#111827; color:#94a3b8; font-weight:500; text-align:left; padding:10px 12px; border-bottom:2px solid #1e293b; white-space:nowrap; position:sticky; top:0; z-index:1; }
+.cms-table tbody tr { transition:background 0.1s; }
+.cms-table tbody tr:hover { background:rgba(56,189,248,0.04); }
+.cms-table tbody td { padding:10px 12px; border-bottom:1px solid #1e293b; vertical-align:middle; }
+.cms-table tbody tr.tr-pinned td:first-child { color:#fbbf24; }
+.cms-col-pin { width:32px; text-align:center !important; }
+.cms-col-cat { width:80px; }
+.cms-col-title { min-width:160px; }
+.cms-col-tags { width:120px; }
+.cms-col-author { width:100px; }
+.cms-col-time { width:100px; white-space:nowrap; }
+.cms-col-actions { width:110px; white-space:nowrap; text-align:right !important; }
+.cms-table .cms-post-title { font-weight:500; cursor:pointer; color:#e2e8f0; }
+.cms-table .cms-post-title:hover { color:#38bdf8; }
+.cms-table .cms-cat-pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; color:#fff; font-weight:500; }
+.cms-table .cms-tag { display:inline-block; font-size:10px; padding:1px 5px; border-radius:4px; background:#334155; color:#94a3b8; margin:1px; }
+.cms-table .cms-action-btn { background:transparent; border:none; cursor:pointer; font-size:14px; padding:4px 6px; border-radius:4px; color:#64748b; transition:color 0.1s,background 0.1s; }
+.cms-table .cms-action-btn:hover { color:#e2e8f0; background:rgba(255,255,255,0.05); }
+.cms-table .cms-action-btn.del:hover { color:#ef4444; background:rgba(239,68,68,0.1); }
+.cms-empty { text-align:center; padding:60px 20px; color:#64748b; display:flex; flex-direction:column; align-items:center; gap:16px; font-size:18px; }
+.cms-preview-modal { /* reuse overlay pattern */ }
 .btn-icon {
     background: transparent;
     border: none;
@@ -884,12 +916,46 @@ footer input[type="text"] {
             <button class="btn btn-secondary file-clear-btn" id="btnClearDone" style="display:none">清除已完成</button>        </div>
     </section>
     <section class="tab-pane" data-tab="noticeboard">
-        <div class="notice-container">
-            <div class="notice-header">
-                <h2>📋 公告欄</h2>
-                <button class="btn btn-primary" id="btnNewPost">✏️ 新增公告</button>
+        <div class="cms-container">
+            <div class="cms-header">
+                <h2>📋 公告管理</h2>
+                <div class="cms-toolbar">
+                    <input type="text" class="cms-search" id="cmsSearch" placeholder="🔍 搜尋公告...">
+                    <select class="cms-filter" id="cmsFilterCat">
+                        <option value="">全部分類</option>
+                        <option value="重要">重要</option>
+                        <option value="日常">日常</option>
+                        <option value="交接事項">交接事項</option>
+                        <option value="其他事項">其他事項</option>
+                    </select>
+                    <button class="btn btn-primary" id="btnNewPost">✏️ 新增公告</button>
+                </div>
             </div>
-            <div class="notice-list" id="noticeList"></div>
+            <div class="cms-stats-bar" id="cmsStatsBar">
+                <span>總計: <strong id="cmsTotal">0</strong></span>
+                <span>置頂: <strong id="cmsPinned">0</strong></span>
+                <span>重要: <strong id="cmsImportant">0</strong></span>
+            </div>
+            <div class="cms-table-wrap">
+                <table class="cms-table" id="cmsTable">
+                    <thead>
+                        <tr>
+                            <th class="cms-col-pin">📌</th>
+                            <th class="cms-col-cat">分類</th>
+                            <th class="cms-col-title">標題</th>
+                            <th class="cms-col-tags">標籤</th>
+                            <th class="cms-col-author">作者</th>
+                            <th class="cms-col-time">時間</th>
+                            <th class="cms-col-actions">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cmsTbody"></tbody>
+                </table>
+            </div>
+            <div class="cms-empty" id="cmsEmpty" style="display:none">
+                <p>📋 尚無公告</p>
+                <button class="btn btn-primary" id="btnNewPostEmpty">✏️ 建立第一則公告</button>
+            </div>
         </div>
     </section>
 
@@ -1237,60 +1303,140 @@ function mergeNoticePosts(incoming) {
 }
 
 function renderNoticeBoard() {
-    // Render to both tab pane and sidebar
-    const list = document.getElementById('noticeList');
+    renderCmsTable();
+
+    // Also render sidebar compact cards
     const sidebarList = document.getElementById('noticeListSidebar');
-    [list, sidebarList].forEach(container => renderNoticeBoardInner(container));
+    if (sidebarList) {
+        const sorted = [...APP.state.noticePosts].sort((a, b) => {
+            if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+            return b.timestamp - a.timestamp;
+        });
+        if (sorted.length === 0) {
+            sidebarList.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;font-size:14px">暫無公告</div>';
+            return;
+        }
+        sidebarList.innerHTML = sorted.map(post => {
+            const timeStr = new Date(post.timestamp).toLocaleString('zh-TW', {hour:'2-digit',minute:'2-digit'});
+            const catColor = getCategoryColor(post.category || '');
+            const catLabel = NOTICE_CATEGORIES.find(c => c.value === (post.category || ''))?.label || '';
+            const categoryBadge = catLabel ? '<span class="category-badge" style="background:' + catColor + ';font-size:10px;padding:1px 6px;">' + escapeHtml(catLabel) + '</span>' : '';
+            const tagsHtml = (post.tags && post.tags.length) ? post.tags.slice(0,2).map(t => '<span class="tag-badge" style="font-size:9px;">' + escapeHtml(t) + '</span>').join('') : '';
+            return '<div class="notice-card' + (post.pinned ? ' pinned' : '') + '" style="border-left-color:' + catColor + ';padding:10px 12px;">'
+                + '<div class="notice-card-header" style="margin-bottom:4px;">'
+                + '<div class="notice-card-title" style="font-size:14px;">' + categoryBadge + escapeHtml(post.title) + '</div>'
+                + (post.pinned ? '<span class="pin-badge" style="font-size:12px;">📌</span>' : '')
+                + '</div>'
+                + '<div class="notice-card-meta" style="font-size:11px;margin-bottom:2px;">' + escapeHtml(post.author) + ' · ' + timeStr + '</div>'
+                + (tagsHtml ? '<div class="notice-card-meta">' + tagsHtml + '</div>' : '')
+                + '</div>';
+        }).join('');
+    }
 }
 
-function renderNoticeBoardInner(list) {
-    if (!list) return;
-    const sorted = [...APP.state.noticePosts].sort((a, b) => {
+function getCmsFilteredPosts() {
+    const search = (document.getElementById('cmsSearch')?.value || '').toLowerCase();
+    const catFilter = document.getElementById('cmsFilterCat')?.value || '';
+    let filtered = APP.state.noticePosts;
+    if (catFilter) filtered = filtered.filter(p => p.category === catFilter);
+    if (search) filtered = filtered.filter(p =>
+        (p.title || '').toLowerCase().includes(search) ||
+        (p.content || '').toLowerCase().includes(search) ||
+        (p.author || '').toLowerCase().includes(search) ||
+        (p.tags || []).some(t => t.toLowerCase().includes(search))
+    );
+    return filtered.sort((a, b) => {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
         return b.timestamp - a.timestamp;
     });
-    if (sorted.length === 0) {
-        list.innerHTML = '<div style="color:#64748b;text-align:center;padding:40px;font-size:18px">📋 尚無公告，點擊上方按鈕新增</div>';
-        return;
-    }
-    list.innerHTML = sorted.map(post => {
-        const timeStr = new Date(post.timestamp).toLocaleString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-        const editedStr = post.editedAt ? ' (已編輯)' : '';
+}
+
+function renderCmsTable() {
+    const tbody = document.getElementById('cmsTbody');
+    const empty = document.getElementById('cmsEmpty');
+    const table = document.getElementById('cmsTable');
+    if (!tbody) { renderNoticeBoardSidebar(); return; } // sidebar-only mode
+
+    const total = APP.state.noticePosts.length;
+    const pinned = APP.state.noticePosts.filter(p => p.pinned).length;
+    const important = APP.state.noticePosts.filter(p => p.category === '重要').length;
+    document.getElementById('cmsTotal').textContent = total;
+    document.getElementById('cmsPinned').textContent = pinned;
+    document.getElementById('cmsImportant').textContent = important;
+
+    const filtered = getCmsFilteredPosts();
+    const hasData = filtered.length > 0;
+    tbody.style.display = hasData ? '' : 'none';
+    empty.style.display = hasData ? 'none' : '';
+    if (!hasData) return;
+
+    tbody.innerHTML = filtered.map(post => {
         const catColor = getCategoryColor(post.category || '');
         const catLabel = NOTICE_CATEGORIES.find(c => c.value === (post.category || ''))?.label || '';
-        const categoryBadge = catLabel ? '<span class="category-badge" style="background:' + catColor + '">' + escapeHtml(catLabel) + '</span>' : '';
-        const tagsHtml = (post.tags && post.tags.length) ? post.tags.map(t => '<span class="tag-badge">' + escapeHtml(t) + '</span>').join('') : '';
-        return '<div class="notice-card' + (post.pinned ? ' pinned' : '') + '" style="border-left-color:' + catColor + '">'
-            + '<div class="notice-card-header">'
-            + '<div class="notice-card-title">' + categoryBadge + escapeHtml(post.title) + '</div>'
-            + (post.pinned ? '<span class="pin-badge">📌</span>' : '')
-            + '</div>'
-            + '<div class="notice-card-meta">' + escapeHtml(post.author) + ' · ' + timeStr + editedStr + '</div>'
-            + '<div class="notice-card-meta">' + tagsHtml + '</div>'
-            + '<div class="notice-card-content">' + escapeHtml(post.content) + '</div>'
-            + '<div class="notice-card-actions">'
-            + '<button class="btn-icon" data-action="edit" data-id="' + post.id + '">✏️</button>'
-            + '<button class="btn-icon" data-action="pin" data-id="' + post.id + '">' + (post.pinned ? '📌 取消置頂' : '📌 置頂') + '</button>'
-            + '<button class="btn-icon" data-action="delete" data-id="' + post.id + '" style="color:#ef4444">🗑</button>'
-            + '</div></div>';
+        const catPill = catLabel ? '<span class="cms-cat-pill" style="background:' + catColor + '">' + escapeHtml(catLabel) + '</span>' : '<span style="color:#475569;">—</span>';
+        const tagsHtml = (post.tags && post.tags.length) ? post.tags.map(t => '<span class="cms-tag">' + escapeHtml(t) + '</span>').join('') : '<span style="color:#475569;">—</span>';
+        const timeStr = new Date(post.timestamp).toLocaleString('zh-TW', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+        const pinnedMark = post.pinned ? '📌' : '';
+        return '<tr class="' + (post.pinned ? 'tr-pinned' : '') + '">'
+            + '<td class="cms-col-pin">' + pinnedMark + '</td>'
+            + '<td class="cms-col-cat">' + catPill + '</td>'
+            + '<td class="cms-col-title"><span class="cms-post-title" data-id="' + post.id + '" title="' + escapeHtml(post.content) + '">' + escapeHtml(post.title) + '</span></td>'
+            + '<td class="cms-col-tags">' + tagsHtml + '</td>'
+            + '<td class="cms-col-author">' + escapeHtml(post.author || '—') + '</td>'
+            + '<td class="cms-col-time" style="color:#64748b;">' + timeStr + '</td>'
+            + '<td class="cms-col-actions">'
+            + '<button class="cms-action-btn" data-action="edit" data-id="' + post.id + '" title="編輯">✏️</button>'
+            + '<button class="cms-action-btn" data-action="pin" data-id="' + post.id + '" title="' + (post.pinned ? '取消置頂' : '置頂') + '">📌</button>'
+            + '<button class="cms-action-btn del" data-action="delete" data-id="' + post.id + '" title="刪除">🗑</button>'
+            + '</td></tr>';
     }).join('');
 
-    list.querySelectorAll('[data-action="edit"]').forEach(btn => {
+    // Wire up
+    tbody.querySelectorAll('.cms-post-title').forEach(el => {
+        el.addEventListener('click', () => {
+            const post = APP.state.noticePosts.find(p => p.id === el.dataset.id);
+            if (post) showNoticeForm(post);
+        });
+    });
+    tbody.querySelectorAll('[data-action="edit"]').forEach(btn => {
         btn.addEventListener('click', () => {
             const post = APP.state.noticePosts.find(p => p.id === btn.dataset.id);
             if (post) showNoticeForm(post);
         });
     });
-    list.querySelectorAll('[data-action="pin"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            togglePinNoticePost(btn.dataset.id);
-        });
+    tbody.querySelectorAll('[data-action="pin"]').forEach(btn => {
+        btn.addEventListener('click', () => togglePinNoticePost(btn.dataset.id));
     });
-    list.querySelectorAll('[data-action="delete"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            deleteNoticePost(btn.dataset.id);
-        });
+    tbody.querySelectorAll('[data-action="delete"]').forEach(btn => {
+        btn.addEventListener('click', () => deleteNoticePost(btn.dataset.id));
     });
+}
+
+// Fallback: render sidebar when CMS elements not present
+function renderNoticeBoardSidebar() {
+    const sidebarList = document.getElementById('noticeListSidebar');
+    if (!sidebarList) return;
+    const sorted = [...APP.state.noticePosts].sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return b.timestamp - a.timestamp;
+    });
+    if (sorted.length === 0) {
+        sidebarList.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;">暫無公告</div>';
+        return;
+    }
+    sidebarList.innerHTML = sorted.map(post => {
+        const timeStr = new Date(post.timestamp).toLocaleString('zh-TW', {hour:'2-digit',minute:'2-digit'});
+        const catColor = getCategoryColor(post.category || '');
+        const catLabel = NOTICE_CATEGORIES.find(c => c.value === (post.category || ''))?.label || '';
+        const badge = catLabel ? '<span class="category-badge" style="background:' + catColor + ';font-size:10px;padding:1px 6px;">' + escapeHtml(catLabel) + '</span>' : '';
+        return '<div class="notice-card' + (post.pinned ? ' pinned' : '') + '" style="border-left-color:' + catColor + ';padding:10px 12px;">'
+            + '<div class="notice-card-header" style="margin-bottom:4px;">'
+            + '<div class="notice-card-title" style="font-size:14px;">' + badge + escapeHtml(post.title) + '</div>'
+            + (post.pinned ? '<span style="font-size:12px;">📌</span>' : '')
+            + '</div>'
+            + '<div style="font-size:11px;color:#64748b;">' + escapeHtml(post.author) + ' · ' + timeStr + '</div>'
+            + '</div>';
+    }).join('');
 }
 
 function showNoticeForm(post) {
@@ -3231,9 +3377,16 @@ renderNoticeBoard();
 document.getElementById('btnNewPost').addEventListener('click', () => {
     showNoticeForm();
 });
+document.getElementById('btnNewPostEmpty')?.addEventListener('click', () => {
+    showNoticeForm();
+});
 document.getElementById('btnNewPostSidebar')?.addEventListener('click', () => {
     showNoticeForm();
 });
+
+// CMS search/filter live update
+document.getElementById('cmsSearch')?.addEventListener('input', renderCmsTable);
+document.getElementById('cmsFilterCat')?.addEventListener('change', renderCmsTable);
 
 // ========== Settings Tab Watcher ==========
 function updateSettingsView() {
