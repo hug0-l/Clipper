@@ -802,12 +802,15 @@ async def handler(websocket):
                 if not rid or rid not in rooms or not name or not my_peer_id:
                     await websocket.send(json.dumps({"type": "error", "message": "invalid register-name"}))
                     continue
-                # Check for duplicate names
+                # Check for duplicate names — use _N suffix starting from 2
                 final_name = name
                 counter = 1
-                while any(info.get("displayName", "") == final_name for pid, info in rooms[rid].items() if pid != my_peer_id):
+                while True:
+                    has_conflict = any(info.get("displayName", "") == final_name for pid, info in rooms[rid].items() if pid != my_peer_id)
+                    if not has_conflict:
+                        break
                     counter += 1
-                    final_name = f"{name}{counter}"
+                    final_name = f"{name}_{counter}"
                 rooms[rid][my_peer_id]["displayName"] = final_name
                 # Notify the client of their resolved name
                 await websocket.send(json.dumps({"type": "name-resolved", "displayName": final_name, "wasConflict": final_name != name}))
@@ -1042,7 +1045,7 @@ async def handler(websocket):
                 _debug(f"Room {room_id} now empty, deleting")
                 del rooms[room_id]
 
-        if room_id and room_id in rooms:
+        if room_id and room_id in rooms and len(rooms[room_id]) > 0:
             asyncio.create_task(_broadcast_peer_list(room_id))
         _log('DISCONNECT', f'{my_peer_id} disconnected (room: {room_id})')
 
