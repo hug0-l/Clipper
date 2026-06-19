@@ -566,6 +566,24 @@ async def handler(websocket):
                 except websockets.exceptions.ConnectionClosed:
                     pass
 
+            elif msg_type == "relay-chunk":
+                rid = data.get("room")
+                target = data.get("to")
+                chunk_data = {
+                    "type": "relay-chunk",
+                    "from": my_peer_id,
+                    "fileId": data.get("fileId"),
+                    "chunk": data.get("chunk"),
+                    "index": data.get("index"),
+                    "total": data.get("total"),
+                }
+                if not rid or rid not in rooms or not target or target not in rooms[rid]:
+                    continue
+                try:
+                    await rooms[rid][target]["ws"].send(json.dumps(chunk_data))
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+
             elif msg_type == "dump":
                 iso_ts = datetime.now(timezone.utc).isoformat()
                 rooms_diag = {}
