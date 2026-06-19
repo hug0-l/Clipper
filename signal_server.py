@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VCC_Clipper signaling server - N-peer WebSocket room for WebRTC Full Mesh."""
+"""Clipper signaling server - N-peer WebSocket room for WebRTC Full Mesh."""
 
 import asyncio
 import json

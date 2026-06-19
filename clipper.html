@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VCC Clipper v1.0</title>
+<title>Clipper v1.1</title>
 <style>
 *, *::before, *::after {
     box-sizing: border-box;
@@ -817,7 +817,7 @@ footer input[type="text"] {
 <body>
 
 <header>
-    <h1>VCC Clipper v1.0</h1>
+    <h1>Clipper v1.1</h1>
     <span class="status-badge disconnected" id="statusBadge">🔴 未連線</span>
     <span class="peer-count" id="peerCount"></span>    <span class="display-name-label" style="color:#64748b;font-size:15px;">你現在顯示為：</span><span class="display-name-span" id="displayNameSpan"></span>
 
@@ -939,9 +939,9 @@ footer input[type="text"] {
     </section>
     <section class="tab-pane" data-tab="about">
         <div style="max-width:500px;margin:0 auto;">
-            <h2 style="font-size:25px;font-weight:600;margin-bottom:12px;">關於 VCC Clipper</h2>
+            <h2 style="font-size:25px;font-weight:600;margin-bottom:12px;">關於 Clipper</h2>
             <p style="color:#94a3b8;margin-bottom:20px;line-height:1.7;">
-                VCC Clipper 是一套內網跨子網 P2P 多人協作工具，透過 WebRTC 建立點對點連線，
+                Clipper 是一套內網跨子網 P2P 多人協作工具，透過 WebRTC 建立點對點連線，
                 搭配 WebSocket 信令伺服器進行配對與持久化資料儲存。支援多達 50 台裝置同時連線。
             </p>
             <table style="color:#94a3b8;font-size:16px;line-height:2;">
@@ -949,7 +949,7 @@ footer input[type="text"] {
                 <tr><td style="padding-right:20px;color:#64748b;">作者</td><td>Hugo Leung</td></tr>
                 <tr><td style="padding-right:20px;color:#64748b;">技術</td><td>WebRTC · WebSocket · Python · WebSockets</td></tr>
                 <tr><td style="padding-right:20px;color:#64748b;">授權</td><td>MIT</td></tr>
-                <tr><td style="padding-right:20px;color:#64748b;">檔案</td><td>VCC_Clipper.html (2,900+ 行) + signal_server.py (630+ 行)</td></tr>
+                <tr><td style="padding-right:20px;color:#64748b;">檔案</td><td>clipper.html (2,900+ 行) + signal_server.py (630+ 行)</td></tr>
             </table>
             <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;">🚀 功能</h3>
             <ul style="color:#94a3b8;font-size:16px;line-height:2;padding-left:20px;">
@@ -2209,7 +2209,7 @@ document.getElementById('displayNameSpan').addEventListener('click', function() 
         if (e.key === 'Escape') { commit(''); }
     });
 });
-console.log('[VCC] App initialized');console.log('[VCC] App initialized');
+console.log('[Clipper] App initialized');
 
 // ========== Clock ==========
 function updateClock() {

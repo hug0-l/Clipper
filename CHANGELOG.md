@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to VCC Clipper are documented here.
+All notable changes to Clipper are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
@@ -61,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 | 檔案 | v1.0 | 1.1.0 | 變更 |
 |------|------|-------|------|
-| VCC_Clipper.html | 1,497 行 | ~3,100 行 | +1,600 |
+| clipper.html | 1,497 行 | ~3,100 行 | +1,600 |
 | signal_server.py | 190 行 | ~640 行 | +450 |
 | CHANGELOG.md | — | 新增 | +90 |
 | README.md | 99 行 | 170 行 | +71 |
