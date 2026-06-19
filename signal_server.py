@@ -453,6 +453,30 @@ async def handler(websocket):
                 )
                 _save_state()
 
+            elif msg_type == "checklist-reset":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                board_id = data.get("id") or data.get("checklistId")
+                if not board_id:
+                    await websocket.send(json.dumps({"type": "error", "message": "checklistId required"}))
+                    continue
+                for board in room_data[rid]["checklists"]:
+                    if board.get("id") == board_id:
+                        for item in board.get("items", []):
+                            item["checked"] = False
+                            item["checkedAt"] = None
+                        break
+                _broadcast(
+                    rooms[rid],
+                    {"type": "checklist-reset", "id": board_id},
+                    exclude=websocket,
+                )
+                _save_state()
+                _log('CHECKLIST', f'{my_peer_id} reset all items in board {board_id} in {rid}')
+
             elif msg_type == "state-get":
                 rid = data.get("room")
                 if not rid or rid not in rooms:

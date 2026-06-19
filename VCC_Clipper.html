@@ -509,6 +509,9 @@ footer input[type="text"] {
     color: #e2e8f0;
     background: rgba(255,255,255,0.05);
 }
+.cl-reset-btn:hover {
+    background: rgba(245,158,11,0.15) !important;
+}
 .notice-post-form {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -1077,6 +1080,10 @@ function createNoticePost(title, content, category, tagsString) {
 }
 
 function editNoticePost(id, title, content, category, tagsString) {
+    if (!APP.state.connected || !APP.state.room) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
     const post = APP.state.noticePosts.find(p => p.id === id);
     if (!post) return;
     const tags = tagsString ? tagsString.split(',').map(t => t.trim()).filter(Boolean) : [];
@@ -1219,9 +1226,26 @@ function handleWsMessage(data) {
             break;
 
         case 'room-state':
-            // data.noticePosts, data.checklists
-            APP.state.noticePosts = data.noticePosts || [];
-            APP.state.checklists = data.checklists || [];
+            // Merge server data with local: keep local-only items, server items take precedence
+            if (data.noticePosts) {
+                const serverPostIds = new Set(data.noticePosts.map(p => p.id));
+                const localOnlyPosts = APP.state.noticePosts.filter(p => !serverPostIds.has(p.id));
+                APP.state.noticePosts = [...data.noticePosts, ...localOnlyPosts];
+            }
+            if (data.checklists) {
+                const serverBoardIds = new Set(data.checklists.map(b => b.id));
+                const localOnlyBoards = APP.state.checklists.filter(b => !serverBoardIds.has(b.id));
+                APP.state.checklists = [...data.checklists, ...localOnlyBoards];
+                // Merge items inside matching boards
+                for (const serverBoard of data.checklists) {
+                    const localBoard = APP.state.checklists.find(b => b.id === serverBoard.id);
+                    if (localBoard && serverBoard.items) {
+                        const serverItemIds = new Set(serverBoard.items.map(i => i.id));
+                        const localOnlyItems = localBoard.items.filter(i => !serverItemIds.has(i.id));
+                        localBoard.items = [...serverBoard.items, ...localOnlyItems];
+                    }
+                }
+            }
             saveToStorage('vcc_notice_posts', APP.state.noticePosts);
             saveToStorage('vcc_checklists', APP.state.checklists);
             renderNoticeBoard();
@@ -1348,7 +1372,22 @@ function handleWsMessage(data) {
             }
             break;
 
-        case 'dump-result':case 'dump-result':
+        case 'checklist-reset':
+            // data.id — checklist board id
+            {
+                const rBoard = APP.state.checklists.find(b => b.id === data.id);
+                if (rBoard) {
+                    for (const item of rBoard.items) {
+                        item.checked = false;
+                        item.checkedAt = null;
+                    }
+                    saveToStorage('vcc_checklists', APP.state.checklists);
+                    renderChecklistBoards();
+                }
+            }
+            break;
+
+        case 'dump-result':
             console.log('=== Server Dump ===', JSON.stringify(data, null, 2));
             APP.showStatusMsg('🔍 伺服器資料已輸出到開發者主控台');
             break;
@@ -1850,6 +1889,7 @@ function renderChecklistBoards() {
             + '<button class="btn-icon" data-action="add-item" data-id="' + board.id + '" title="新增項目">➕</button>'
             + '<button class="btn-icon" data-action="edit" data-id="' + board.id + '" title="編輯">✏️</button>'
             + '<button class="btn-icon" data-action="pin" data-id="' + board.id + '" title="' + (board.pinned ? '取消置頂' : '置頂') + '">📌</button>'
+            + '<button class="btn-icon cl-reset-btn" data-action="reset" data-id="' + board.id + '" title="全部重設" style="color:#f59e0b">🔄</button>'
             + '<button class="btn-icon" data-action="delete" data-id="' + board.id + '" title="刪除" style="color:#ef4444">🗑</button>'
             + '</span>'
             + '</div>'
@@ -1904,6 +1944,12 @@ function renderChecklistBoards() {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
             togglePinChecklist(this.dataset.id);
+        });
+    });
+    container.querySelectorAll('[data-action="reset"]').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            resetChecklistBoard(this.dataset.id);
         });
     });
     container.querySelectorAll('[data-action="delete"]').forEach(btn => {
@@ -2137,6 +2183,21 @@ async function deleteChecklistBoard(checklistId) {
     saveToStorage('vcc_checklists', APP.state.checklists);
     sendWsMessage({type: 'checklistboard-delete', room: APP.state.room, id: checklistId});
     renderChecklistBoards();
+}
+
+function resetChecklistBoard(checklistId) {
+    const board = APP.state.checklists.find(b => b.id === checklistId);
+    if (!board) return;
+    const checkedCount = board.items.filter(i => i.checked).length;
+    if (checkedCount === 0) return;
+    for (const item of board.items) {
+        item.checked = false;
+        item.checkedAt = null;
+    }
+    saveToStorage('vcc_checklists', APP.state.checklists);
+    sendWsMessage({type: 'checklist-reset', room: APP.state.room, id: checklistId});
+    renderChecklistBoards();
+    APP.showStatusMsg('🔄 已重設所有勾選');
 }
 
 // ========== Checklist v2 Init ==========
