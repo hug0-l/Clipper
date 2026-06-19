@@ -4216,13 +4216,6 @@ function updatePeerTargetUI() {
         });
         list.appendChild(btn);
     }
-    // Auto-select sole reachable peer when none selected
-    const reachable = [...APP.state.peers.keys()].filter(pid => isPeerReachable(pid));
-    if (reachable.length === 1 && APP.state.selectedTargetPeerIds.size === 0) {
-        APP.state.selectedTargetPeerIds.add(reachable[0]);
-        updatePeerTargetUI();
-        return;
-    }
 }
 
 async function sendFileToPeer(entry, pid) {
