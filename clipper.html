@@ -1427,9 +1427,13 @@ const APP = {
         const toast = document.getElementById('errorToast');
         toast.className = 'visible';
         toast.innerHTML = '<span class="toast-msg">' + msg.replace(/"/g, '&quot;') + '</span>'
+            + '<button class="toast-btn dismiss-toast-btn" style="margin-left:8px;">✕</button>'
             + (showReconnect
-                ? '<button class="toast-btn" id="toastReconnectBtn">重新連線</button>'
-                : '<button class="toast-btn" style="margin-left:8px" onclick="document.getElementById(\'errorToast\').className=\'\'">✕</button>');
+                ? '<button class="toast-btn" id="toastReconnectBtn" style="margin-left:4px;">重新連線</button>'
+                : '');
+        toast.querySelector('.dismiss-toast-btn')?.addEventListener('click', () => {
+            toast.className = '';
+        });
         if (showReconnect) {
             const btn = document.getElementById('toastReconnectBtn');
             if (btn) btn.addEventListener('click', () => {
@@ -2544,6 +2548,8 @@ function setupDataChannel(dc, peerId) {
 
     dc.onopen = () => {
         console.log(`[DC:${peerId}] Open`);
+        // Clear any lingering error toast
+        document.getElementById('errorToast').className = '';
         APP.showStatusMsg(`DataChannel 已開啟 (${peerId})`);
         // Store the DC
         const peerState = APP.state.peers.get(peerId);
