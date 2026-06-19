@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **顯示名稱變更未通知伺服器** — 內嵌編輯顯示名稱時自動發送 `register-name`，peer-list 即時更新
 - **線上用戶列表改善** — 顯示 peerId 在名稱旁方便辨識；`isSelf` 判斷改為純 peerId 比對
 - **程式碼審查修復** — 修復 5 個潛在 bug（dead code、重複 WS 連線、`setChecklistReminder` 未定義變數、重複 debug dump 監聽器、case 格式錯誤）
+- **iPhone 無法收發訊息** — 放寬 `sendChatMessage` 和 `relayToPeer` 的連線門禁，從 `APP.state.connected`（需 DC 開啟）改為 WS 連線檢查，iPhone（不支援 WebRTC）現在可透過 relay 正常收發
 
 ## [1.1.0] — 2026-06-19
 
