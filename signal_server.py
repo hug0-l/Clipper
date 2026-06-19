@@ -320,6 +320,9 @@ async def _mini_http(reader, writer):
         resp = (b"HTTP/1.1 " + status + b"\r\n"
                 b"Content-Type: " + ct + b"\r\n"
                 b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                b"Cache-Control: no-store, no-cache, must-revalidate\r\n"
+                b"Pragma: no-cache\r\n"
+                b"Expires: 0\r\n"
                 b"Connection: close\r\n\r\n") + body
         writer.write(resp); await writer.drain()
     except Exception:
