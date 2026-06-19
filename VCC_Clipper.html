@@ -440,6 +440,22 @@ footer input[type="text"] {
     to { transform: translateY(0); }
 }
 
+/* --- Checklist Styles --- */
+.checklist-container { max-width:600px; margin:0 auto; }
+.checklist-add-bar { display:flex; gap:8px; margin-bottom:16px; }
+.checklist-add-bar input { flex:1; background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:10px 14px; border-radius:8px; font-size:14px; outline:none; }
+.checklist-add-bar input:focus { border-color:#38bdf8; }
+.checklist-items { display:flex; flex-direction:column; gap:4px; }
+.checklist-item { display:flex; align-items:center; padding:8px 12px; background:#1e293b; border-radius:8px; gap:10px; }
+.checklist-item.done { opacity:0.6; }
+.checklist-item-checkbox { width:18px; height:18px; cursor:pointer; accent-color:#38bdf8; flex-shrink:0; }
+.checklist-item-text { flex:1; cursor:pointer; }
+.checklist-item-text.done { text-decoration:line-through; color:#64748b; }
+.checklist-item-meta { font-size:11px; color:#475569; margin-left:auto; white-space:nowrap; }
+.checklist-item-del { background:none; border:none; color:#ef4444; cursor:pointer; font-size:14px; padding:2px 6px; border-radius:4px; display:none; }
+.checklist-item:hover .checklist-item-del { display:inline-block; }
+.checklist-item-del:hover { background:rgba(239,68,68,0.1); }
+.checklist-empty { text-align:center; padding:40px 20px; color:#64748b; font-size:14px; }
 </style>
 </head>
 <body>
@@ -455,6 +471,8 @@ footer input[type="text"] {
 <nav>
     <button class="tab-btn active" data-target="clipboard">💬 聊天室</button>
     <button class="tab-btn" data-target="filetransfer">📁 檔案傳輸</button>
+    <button class="tab-btn" data-target="checklist">✅ 檢查清單</button>
+
 
     <button class="tab-btn" data-target="about">ℹ️ 關於</button>
     <div class="tab-spacer"></div>
@@ -491,7 +509,17 @@ footer input[type="text"] {
         </div>
     </section>
 
-    <section class="tab-pane" data-tab="about">
+        <section class="tab-pane" data-tab="checklist">
+        <div class="checklist-container">
+            <h2 style="margin-bottom:12px;">✅ 檢查清單</h2>
+            <div class="checklist-add-bar">
+                <input type="text" id="checklistInput" placeholder="新增待辦事項，Enter 新增...">
+                <button class="btn btn-primary" id="btnChecklistAdd">新增</button>
+            </div>
+            <div class="checklist-items" id="checklistItems"></div>
+        </div>
+    </section>
+<section class="tab-pane" data-tab="about">
         <div style="max-width:500px;margin:0 auto;">
             <h2 style="font-size:20px;font-weight:600;margin-bottom:12px;">關於 VCC Clipper</h2>
             <p style="color:#94a3b8;margin-bottom:20px;line-height:1.7;">
@@ -553,7 +581,8 @@ const APP = {
         intentionalDisconnect: false,
         syncProviders: [],
         syncConsumers: [],
-        persistedChatMessages: [],
+        persistedChatMessages: [],        checklistItems: [], // array of {id, text, checked, addedBy, timestamp, checkedAt}
+
     },
     updateStatus(status) {
         const badge = document.getElementById('statusBadge');
@@ -1073,6 +1102,27 @@ function setupDataChannel(dc, peerId) {
                             fn(msg);
                         }
                         break;
+                    case 'checklist-add':
+                        mergeIncomingChecklistItem(msg.item);
+                        saveToStorage('vcc_checklist_items', APP.state.checklistItems);
+                        renderChecklist();
+                        break;
+                    case 'checklist-toggle':
+                        {
+                            const item = APP.state.checklistItems.find(i => i.id === msg.id);
+                            if (item) {
+                                item.checked = msg.checked;
+                                item.checkedAt = msg.checkedAt;
+                            }
+                            saveToStorage('vcc_checklist_items', APP.state.checklistItems);
+                            renderChecklist();
+                        }
+                        break;
+                    case 'checklist-delete':
+                        APP.state.checklistItems = APP.state.checklistItems.filter(i => i.id !== msg.id);
+                        saveToStorage('vcc_checklist_items', APP.state.checklistItems);
+                        renderChecklist();
+                        break;
                     default:
                         console.log(`[DC:${peerId}] Unknown message type:`, msg.type);
                 }
@@ -1232,6 +1282,136 @@ APP.state.persistedChatMessages = savedMessages;
 for (const msg of savedMessages) {
     renderChatMessage(msg.from, msg.text, msg.timestamp);
 }
+// ========== Checklist ==========
+function renderChecklist() {
+    const container = document.getElementById('checklistItems');
+    const items = APP.state.checklistItems;
+    if (items.length === 0) {
+        container.innerHTML = '<div class="checklist-empty">暫無待辦事項</div>';
+        return;
+    }
+    // Sort: unchecked first (timestamp asc), then checked (checkedAt desc)
+    const sorted = [...items].sort((a, b) => {
+        if (a.checked !== b.checked) return a.checked ? 1 : -1;
+        if (!a.checked) return a.timestamp - b.timestamp;
+        return (b.checkedAt || 0) - (a.checkedAt || 0);
+    });
+    container.innerHTML = sorted.map(item => {
+        const timeStr = new Date(item.timestamp).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'});
+        const checkedClass = item.checked ? ' done' : '';
+        const textClass = item.checked ? ' done' : '';
+        return '<div class="checklist-item' + checkedClass + '" data-id="' + item.id + '">'
+            + '<input type="checkbox" class="checklist-item-checkbox" ' + (item.checked ? 'checked' : '') + '>'
+            + '<span class="checklist-item-text' + textClass + '">' + escapeHtml(item.text) + '</span>'
+            + '<span class="checklist-item-meta">' + escapeHtml(item.addedBy) + ' · ' + timeStr + '</span>'
+            + '<button class="checklist-item-del" title="刪除">🗑</button>'
+            + '</div>';
+    }).join('');
+    // Wire up checkboxes
+    container.querySelectorAll('.checklist-item-checkbox').forEach(cb => {
+        cb.addEventListener('change', function() {
+            const id = this.closest('.checklist-item').dataset.id;
+            toggleChecklistItem(id);
+        });
+    });
+    // Wire up text click to toggle
+    container.querySelectorAll('.checklist-item-text').forEach(el => {
+        el.addEventListener('click', function() {
+            const id = this.closest('.checklist-item').dataset.id;
+            toggleChecklistItem(id);
+        });
+    });
+    // Wire up delete buttons
+    container.querySelectorAll('.checklist-item-del').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const id = this.closest('.checklist-item').dataset.id;
+            deleteChecklistItem(id);
+        });
+    });
+}
+
+function addChecklistItem(text) {
+    if (!text.trim()) return;
+    if (!APP.state.connected) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
+    const item = {
+        id: crypto.randomUUID(),
+        text: text.trim(),
+        checked: false,
+        addedBy: APP.state.displayName,
+        timestamp: Date.now(),
+        checkedAt: null
+    };
+    APP.state.checklistItems.push(item);
+    saveToStorage('vcc_checklist_items', APP.state.checklistItems);
+    broadcastToPeers(JSON.stringify({type: 'checklist-add', item}));
+    renderChecklist();
+}
+
+function toggleChecklistItem(id) {
+    const item = APP.state.checklistItems.find(i => i.id === id);
+    if (!item) return;
+    item.checked = !item.checked;
+    item.checkedAt = item.checked ? Date.now() : null;
+    saveToStorage('vcc_checklist_items', APP.state.checklistItems);
+    broadcastToPeers(JSON.stringify({type: 'checklist-toggle', id, checked: item.checked, checkedAt: item.checkedAt}));
+    renderChecklist();
+}
+
+async function deleteChecklistItem(id) {
+    const confirmed = await showConfirmDialog('確定要刪除此待辦事項嗎？');
+    if (!confirmed) return;
+    APP.state.checklistItems = APP.state.checklistItems.filter(i => i.id !== id);
+    saveToStorage('vcc_checklist_items', APP.state.checklistItems);
+    broadcastToPeers(JSON.stringify({type: 'checklist-delete', id}));
+    renderChecklist();
+}
+
+function mergeIncomingChecklistItem(incoming) {
+    const exists = APP.state.checklistItems.some(i => i.id === incoming.id);
+    if (!exists) {
+        APP.state.checklistItems.push(incoming);
+    }
+}
+
+function mergeChecklistItems(incomingItems) {
+    for (const item of incomingItems) {
+        mergeIncomingChecklistItem(item);
+    }
+}
+
+// --- Load persisted checklist ---
+(function() {
+    const savedItems = loadFromStorage('vcc_checklist_items', []);
+    APP.state.checklistItems = savedItems;
+    renderChecklist();
+    // Wire up add bar
+    const input = document.getElementById('checklistInput');
+    const addBtn = document.getElementById('btnChecklistAdd');
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            addChecklistItem(input.value);
+            input.value = '';
+        }
+    });
+    addBtn.addEventListener('click', () => {
+        addChecklistItem(input.value);
+        input.value = '';
+    });
+    // Register sync provider
+    APP.registerSyncProvider(() => ({checklistItems: APP.state.checklistItems}));
+    // Register sync consumer
+    APP.registerSyncConsumer((data) => {
+        if (data.checklistItems) {
+            mergeChecklistItems(data.checklistItems);
+            saveToStorage('vcc_checklist_items', APP.state.checklistItems);
+            renderChecklist();
+        }
+    });
+})();
+
 // ========== File Transfer ===
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 B';
