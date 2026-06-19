@@ -18,7 +18,7 @@ rooms = {}
 peer_ids = set()  # all assigned peerIds across all rooms
 
 MAX_PEERS_PER_ROOM = 50
-# room_id -> {"noticePosts": [...], "checklistItems": [...], "chatMessages": [...]}
+# room_id -> {"noticePosts": [...], "checklists": [...], "chatMessages": [...]}
 room_data = {}
 
 CHAT_RETENTION_DAYS = 7    # How long to keep chat backups (adjustable)
@@ -44,9 +44,29 @@ def _save_state():
         json.dump(room_data, f)
 
 
+def _migrate_room_data():
+    for rid in room_data:
+        if "checklistItems" in room_data[rid]:
+            old_items = room_data[rid].pop("checklistItems", [])
+            if old_items and "checklists" not in room_data[rid]:
+                room_data[rid]["checklists"] = [{
+                    "id": "legacy-" + rid,
+                    "title": "舊檢查清單",
+                    "category": "",
+                    "tags": [],
+                    "color": "#38bdf8",
+                    "pinned": False,
+                    "createdBy": "系統",
+                    "createdAt": int(time.time() * 1000),
+                    "items": old_items
+                }]
+        if "checklists" not in room_data[rid]:
+            room_data[rid]["checklists"] = []
+
+
 def _ensure_room_data(rid):
     if rid not in room_data:
-        room_data[rid] = {"noticePosts": [], "checklistItems": [], "chatMessages": []}
+        room_data[rid] = {"noticePosts": [], "checklists": [], "chatMessages": []}
 
 
 def _generate_peer_id():
@@ -201,10 +221,12 @@ async def handler(websocket):
                     await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
                     continue
                 _ensure_room_data(rid)
-                room_data[rid]["noticePosts"].append(data.get("post", {}))
+                post = data.get("post", {})
+                # Accept optional v2 fields: category, tags, color
+                room_data[rid]["noticePosts"].append(post)
                 _broadcast(
                     rooms[rid],
-                    {"type": "notice-create", "post": data.get("post", {})},
+                    {"type": "notice-create", "post": post},
                     exclude=websocket,
                 )
                 _log('NOTICE', f'{my_peer_id} created post in {rid}')
@@ -222,16 +244,30 @@ async def handler(websocket):
                         post["title"] = data.get("title", post.get("title", ""))
                         post["content"] = data.get("content", post.get("content", ""))
                         post["editedAt"] = data.get("editedAt", time.time() * 1000)
+                        # Optional v2 fields
+                        if "category" in data:
+                            post["category"] = data["category"]
+                        if "tags" in data:
+                            post["tags"] = data["tags"]
+                        if "color" in data:
+                            post["color"] = data["color"]
                         break
+                broadcast_msg = {
+                    "type": "notice-edit",
+                    "id": post_id,
+                    "title": data.get("title"),
+                    "content": data.get("content"),
+                    "editedAt": data.get("editedAt"),
+                }
+                if "category" in data:
+                    broadcast_msg["category"] = data["category"]
+                if "tags" in data:
+                    broadcast_msg["tags"] = data["tags"]
+                if "color" in data:
+                    broadcast_msg["color"] = data["color"]
                 _broadcast(
                     rooms[rid],
-                    {
-                        "type": "notice-edit",
-                        "id": post_id,
-                        "title": data.get("title"),
-                        "content": data.get("content"),
-                        "editedAt": data.get("editedAt"),
-                    },
+                    broadcast_msg,
                     exclude=websocket,
                 )
                 _save_state()
@@ -272,16 +308,101 @@ async def handler(websocket):
                 )
                 _save_state()
 
+            elif msg_type == "checklistboard-create":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                room_data[rid]["checklists"].append(data.get("board", {}))
+                _broadcast(
+                    rooms[rid],
+                    {"type": "checklistboard-create", "board": data.get("board", {})},
+                    exclude=websocket,
+                )
+                _save_state()
+                _log('CHECKLIST', f'{my_peer_id} created board in {rid}')
+
+            elif msg_type == "checklistboard-edit":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                board_id = data.get("id")
+                for board in room_data[rid]["checklists"]:
+                    if board.get("id") == board_id:
+                        if "title" in data:
+                            board["title"] = data["title"]
+                        if "category" in data:
+                            board["category"] = data["category"]
+                        if "tags" in data:
+                            board["tags"] = data["tags"]
+                        if "color" in data:
+                            board["color"] = data["color"]
+                        break
+                broadcast_msg = {
+                    "type": "checklistboard-edit",
+                    "id": board_id,
+                    "title": data.get("title"),
+                    "category": data.get("category"),
+                    "tags": data.get("tags"),
+                    "color": data.get("color"),
+                }
+                _broadcast(rooms[rid], broadcast_msg, exclude=websocket)
+                _save_state()
+
+            elif msg_type == "checklistboard-delete":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                del_id = data.get("id")
+                room_data[rid]["checklists"] = [
+                    b for b in room_data[rid]["checklists"] if b.get("id") != del_id
+                ]
+                _broadcast(
+                    rooms[rid],
+                    {"type": "checklistboard-delete", "id": del_id},
+                    exclude=websocket,
+                )
+                _save_state()
+
+            elif msg_type == "checklistboard-pin":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                pin_id = data.get("id")
+                pin_val = data.get("pinned", False)
+                for board in room_data[rid]["checklists"]:
+                    if board.get("id") == pin_id:
+                        board["pinned"] = pin_val
+                        break
+                _broadcast(
+                    rooms[rid],
+                    {"type": "checklistboard-pin", "id": pin_id, "pinned": pin_val},
+                    exclude=websocket,
+                )
+                _save_state()
+
             elif msg_type == "checklist-add":
                 rid = data.get("room")
                 if not rid or rid not in rooms:
                     await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
                     continue
                 _ensure_room_data(rid)
-                room_data[rid]["checklistItems"].append(data.get("item", {}))
+                checklist_id = data.get("checklistId")
+                item = data.get("item", {})
+                for board in room_data[rid]["checklists"]:
+                    if board.get("id") == checklist_id:
+                        board.setdefault("items", []).append(item)
+                        break
                 _broadcast(
                     rooms[rid],
-                    {"type": "checklist-add", "item": data.get("item", {})},
+                    {"type": "checklist-add", "checklistId": checklist_id, "item": item},
                     exclude=websocket,
                 )
                 _save_state()
@@ -292,17 +413,21 @@ async def handler(websocket):
                     await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
                     continue
                 _ensure_room_data(rid)
+                checklist_id = data.get("checklistId")
                 toggle_id = data.get("id")
                 checked = data.get("checked", False)
                 checked_at = data.get("checkedAt", time.time() * 1000)
-                for item in room_data[rid]["checklistItems"]:
-                    if item.get("id") == toggle_id:
-                        item["checked"] = checked
-                        item["checkedAt"] = checked_at
+                for board in room_data[rid]["checklists"]:
+                    if board.get("id") == checklist_id:
+                        for item in board.get("items", []):
+                            if item.get("id") == toggle_id:
+                                item["checked"] = checked
+                                item["checkedAt"] = checked_at
+                                break
                         break
                 _broadcast(
                     rooms[rid],
-                    {"type": "checklist-toggle", "id": toggle_id, "checked": checked, "checkedAt": checked_at},
+                    {"type": "checklist-toggle", "checklistId": checklist_id, "id": toggle_id, "checked": checked, "checkedAt": checked_at},
                     exclude=websocket,
                 )
                 _save_state()
@@ -313,13 +438,17 @@ async def handler(websocket):
                     await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
                     continue
                 _ensure_room_data(rid)
+                checklist_id = data.get("checklistId")
                 del_id = data.get("id")
-                room_data[rid]["checklistItems"] = [
-                    i for i in room_data[rid]["checklistItems"] if i.get("id") != del_id
-                ]
+                for board in room_data[rid]["checklists"]:
+                    if board.get("id") == checklist_id:
+                        board["items"] = [
+                            i for i in board.get("items", []) if i.get("id") != del_id
+                        ]
+                        break
                 _broadcast(
                     rooms[rid],
-                    {"type": "checklist-delete", "id": del_id},
+                    {"type": "checklist-delete", "checklistId": checklist_id, "id": del_id},
                     exclude=websocket,
                 )
                 _save_state()
@@ -333,7 +462,7 @@ async def handler(websocket):
                 await websocket.send(json.dumps({
                     "type": "room-state",
                     "noticePosts": room_data[rid].get("noticePosts", []),
-                    "checklistItems": room_data[rid].get("checklistItems", []),
+                    "checklists": room_data[rid].get("checklists", []),
                 }))
                 _log('STATE', f'{my_peer_id} requested state in {rid}')
 
@@ -368,7 +497,7 @@ async def handler(websocket):
                     rooms_diag[rid_key] = {
                         "peerCount": len(rooms.get(rid_key, {})),
                         "noticePosts": rdata.get("noticePosts", []),
-                        "checklistItems": rdata.get("checklistItems", []),
+                        "checklists": rdata.get("checklists", []),
                         "chatMessageCount": len(rdata.get("chatMessages", [])),
                     }
                 await websocket.send(json.dumps({
@@ -411,6 +540,7 @@ def _broadcast(room_peers, message, exclude=None):
 
 async def main():
     _load_state()
+    _migrate_room_data()
     _log('STARTUP', f'Loaded {len(room_data)} rooms from {DATA_FILE}')
     _log('STARTUP', f'Chat retention: {CHAT_RETENTION_DAYS} days')
     _log('STARTUP', 'listening on ws://localhost:8765')
