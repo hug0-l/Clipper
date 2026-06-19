@@ -753,6 +753,28 @@ footer input[type="text"] {
     min-height: 120px;
     resize: vertical;
 }
+.fmt-toolbar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+}
+.fmt-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 15px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-family: inherit;
+    transition: background 0.1s, color 0.1s;
+}
+.fmt-btn:hover { background: #1e293b; color: #e2e8f0; }
+.fmt-btn:active { background: #334155; }
 .notice-form-buttons {
     display: flex;
     justify-content: flex-end;
@@ -1474,7 +1496,12 @@ function showNoticeForm(post) {
         + '<input type="text" class="notice-form-input" id="noticeFormTitle" placeholder="公告標題" value="' + (isEdit ? escapeHtml(post.title) : '') + '">'
         + '<select class="notice-form-input" id="noticeFormCategory">' + catOptions + '</select>'
         + '<input type="text" class="notice-form-input" id="noticeFormTags" placeholder="標籤，逗號分隔" value="' + escapeHtml(tagsVal) + '">'
-        + '<textarea class="notice-form-input notice-form-textarea" id="noticeFormContent" placeholder="公告內容...">' + (isEdit ? escapeHtml(post.content) : '') + '</textarea>'
+        + '<div class="fmt-toolbar" id="fmtToolbar">'
+        + '<button type="button" class="fmt-btn" data-fmt="bold" title="粗體"><b>B</b></button>'
+        + '<button type="button" class="fmt-btn" data-fmt="italic" title="斜體"><i>I</i></button>'
+        + '<button type="button" class="fmt-btn" data-fmt="strikeThrough" title="刪除線"><s>S</s></button>'
+        + '</div>'
+        + '<textarea class="notice-form-input notice-form-textarea" id="noticeFormContent" placeholder="公告內容...">' + (isEdit ? post.content : '') + '</textarea>'
         + '<div class="notice-form-buttons">'
         + '<button class="btn btn-secondary" id="noticeFormCancel">取消</button>'
         + '<button class="btn btn-primary" id="noticeFormSave">' + (isEdit ? '儲存' : '發布') + '</button>'
@@ -1485,6 +1512,32 @@ function showNoticeForm(post) {
     const categoryInput = document.getElementById('noticeFormCategory');
     const tagsInput = document.getElementById('noticeFormTags');
     const contentInput = document.getElementById('noticeFormContent');
+
+    // Formatting toolbar
+    overlay.querySelectorAll('.fmt-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const ta = contentInput;
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            if (start === undefined || start === end) {
+                APP.showStatusMsg('💡 請先選取要格式化的文字');
+                return;
+            }
+            const fmt = btn.dataset.fmt;
+            let tag;
+            if (fmt === 'bold') tag = 'b';
+            else if (fmt === 'italic') tag = 'i';
+            else if (fmt === 'strikeThrough') tag = 's';
+            const selected = ta.value.substring(start, end);
+            const before = ta.value.substring(0, start);
+            const after = ta.value.substring(end);
+            ta.value = before + '<' + tag + '>' + selected + '</' + tag + '>' + after;
+            // Restore selection around inserted content
+            const newEnd = start + selected.length + 3 + tag.length * 2 + 5;
+            ta.setSelectionRange(newEnd, newEnd);
+            ta.focus();
+        });
+    });
 
     document.getElementById('noticeFormCancel').addEventListener('click', () => overlay.remove());
     document.getElementById('noticeFormSave').addEventListener('click', () => {
