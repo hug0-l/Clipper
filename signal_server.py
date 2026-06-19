@@ -162,7 +162,8 @@ def _init_db():
         room_id TEXT PRIMARY KEY,
         notice_posts TEXT NOT NULL DEFAULT '[]',
         checklists TEXT NOT NULL DEFAULT '[]',
-        chat_messages TEXT NOT NULL DEFAULT '[]'
+        chat_messages TEXT NOT NULL DEFAULT '[]',
+        key_managements TEXT NOT NULL DEFAULT '[]'
     )""")
     conn.commit()
     conn.close()
@@ -174,12 +175,13 @@ def _load_state():
     room_data = {}
     conn = sqlite3.connect(DB_PATH)
     try:
-        rows = conn.execute("SELECT room_id, notice_posts, checklists, chat_messages FROM rooms").fetchall()
-        for rid, np, cl, cm in rows:
+        rows = conn.execute("SELECT room_id, notice_posts, checklists, chat_messages, key_managements FROM rooms").fetchall()
+        for rid, np, cl, cm, km in rows:
             room_data[rid] = {
                 "noticePosts": json.loads(np),
                 "checklists": json.loads(cl),
                 "chatMessages": json.loads(cm),
+                "keyManagements": json.loads(km),
             }
     except sqlite3.OperationalError:
         pass  # table doesn't exist yet
@@ -207,11 +209,12 @@ def _save_state():
         with conn:
             for rid, data in room_data.items():
                 conn.execute(
-                    "INSERT OR REPLACE INTO rooms VALUES (?,?,?,?)",
+                    "INSERT OR REPLACE INTO rooms VALUES (?,?,?,?,?)",
                     (rid,
                      json.dumps(data.get("noticePosts", [])),
                      json.dumps(data.get("checklists", [])),
-                     json.dumps(data.get("chatMessages", [])))
+                     json.dumps(data.get("chatMessages", [])),
+                     json.dumps(data.get("keyManagements", [])))
                 )
     finally:
         conn.close()
@@ -235,6 +238,8 @@ def _migrate_room_data():
                 }]
         if "checklists" not in room_data[rid]:
             room_data[rid]["checklists"] = []
+        if "keyManagements" not in room_data[rid]:
+            room_data[rid]["keyManagements"] = []
 
 
 NTP_PORT = 123
@@ -272,7 +277,7 @@ def _ntp_query(server=None):
 
 def _ensure_room_data(rid):
     if rid not in room_data:
-        room_data[rid] = {"noticePosts": [], "checklists": [], "chatMessages": []}
+        room_data[rid] = {"noticePosts": [], "checklists": [], "chatMessages": [], "keyManagements": []}
 
 
 def _generate_peer_id():
@@ -771,6 +776,7 @@ async def handler(websocket):
                     "type": "room-state",
                     "noticePosts": room_data[rid].get("noticePosts", []),
                     "checklists": room_data[rid].get("checklists", []),
+                    "keyManagements": room_data[rid].get("keyManagements", []),
                 }))
                 _log('STATE', f'{my_peer_id} requested state in {rid}')
                 _debug(f"→ TX room-state: {posts_count} posts, {boards_count} boards to {my_peer_id}")
@@ -1066,6 +1072,111 @@ async def handler(websocket):
                 except json.JSONDecodeError as e:
                     await websocket.send(json.dumps({"type": "admin-import-result", "success": False, "message": f"無效的 JSON 格式：{e}"}))
 
+            elif msg_type == "keymgmt-create":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                entry = data.get("entry", {})
+                if "keyManagements" not in room_data[rid]:
+                    room_data[rid]["keyManagements"] = []
+                room_data[rid]["keyManagements"].append(entry)
+                _broadcast(
+                    rooms[rid],
+                    {"type": "keymgmt-create", "entry": entry},
+                    exclude=websocket,
+                )
+                _log('KEYMGMT', f'{my_peer_id} created key entry in {rid}')
+                _save_state()
+
+            elif msg_type == "keymgmt-edit":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                edit_id = data.get("id")
+                for entry in room_data[rid].get("keyManagements", []):
+                    if entry.get("id") == edit_id:
+                        if "label" in data:
+                            entry["label"] = data["label"]
+                        if "streamKey" in data:
+                            entry["streamKey"] = data["streamKey"]
+                        if "streamUrl" in data:
+                            entry["streamUrl"] = data["streamUrl"]
+                        if "currentProgram" in data:
+                            entry["currentProgram"] = data["currentProgram"]
+                        entry["updatedAt"] = data.get("updatedAt", time.time() * 1000)
+                        break
+                _broadcast(
+                    rooms[rid],
+                    {"type": "keymgmt-edit", "id": edit_id, "label": data.get("label"), "streamKey": data.get("streamKey"), "streamUrl": data.get("streamUrl"), "currentProgram": data.get("currentProgram")},
+                    exclude=websocket,
+                )
+                _save_state()
+                _log('KEYMGMT', f'{my_peer_id} edited key entry {edit_id} in {rid}')
+
+            elif msg_type == "keymgmt-toggle-active":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                toggle_id = data.get("id")
+                new_active = False
+                for entry in room_data[rid].get("keyManagements", []):
+                    if entry.get("id") == toggle_id:
+                        entry["isActive"] = not entry.get("isActive", False)
+                        new_active = entry["isActive"]
+                        break
+                _broadcast(
+                    rooms[rid],
+                    {"type": "keymgmt-toggle-active", "id": toggle_id, "isActive": new_active},
+                    exclude=websocket,
+                )
+                _save_state()
+                _log('KEYMGMT', f'{my_peer_id} toggled key entry {toggle_id} in {rid}')
+
+            elif msg_type == "keymgmt-set-program":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                prog_id = data.get("id")
+                current_program = data.get("currentProgram", "")
+                for entry in room_data[rid].get("keyManagements", []):
+                    if entry.get("id") == prog_id:
+                        entry["currentProgram"] = current_program
+                        entry["updatedAt"] = time.time() * 1000
+                        break
+                _broadcast(
+                    rooms[rid],
+                    {"type": "keymgmt-set-program", "id": prog_id, "currentProgram": current_program},
+                    exclude=websocket,
+                )
+                _save_state()
+                _log('KEYMGMT', f'{my_peer_id} set program for key entry {prog_id} in {rid}')
+
+            elif msg_type == "keymgmt-delete":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                del_id = data.get("id")
+                room_data[rid]["keyManagements"] = [
+                    e for e in room_data[rid].get("keyManagements", []) if e.get("id") != del_id
+                ]
+                _broadcast(
+                    rooms[rid],
+                    {"type": "keymgmt-delete", "id": del_id},
+                    exclude=websocket,
+                )
+                _save_state()
+                _log('KEYMGMT', f'{my_peer_id} deleted key entry {del_id} in {rid}')
+
             elif msg_type == "dump":
                 iso_ts = datetime.now(timezone.utc).isoformat()
                 rooms_diag = {}
@@ -1219,6 +1330,15 @@ async def main():
     log_path = _setup_logging()
     _rotate_logs()
     _init_db()
+    # Add key_managements column for existing databases
+    _migrate_conn = sqlite3.connect(DB_PATH)
+    try:
+        _migrate_conn.execute("ALTER TABLE rooms ADD COLUMN key_managements TEXT NOT NULL DEFAULT '[]'")
+        _migrate_conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    finally:
+        _migrate_conn.close()
     _init_admin_password()
     _load_state()
     _migrate_room_data()
