@@ -4495,6 +4495,7 @@ function renderChatMessage(from, text, timestamp, msgId) {
     container.scrollTop = container.scrollHeight;
     // Limit to 200 messages
     while (container.children.length > 200) {
+        container.removeChild(container.firstChild);
     }
 }
 
