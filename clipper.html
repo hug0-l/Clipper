@@ -3981,6 +3981,11 @@ function appendChatMessage(from, text, timestamp) {
     }
     // Render DOM
     renderChatMessage(from, text, timestamp);
+    // Popup notification for incoming messages from others
+    if (from !== APP.state.displayName) {
+        const short = text.length > 60 ? text.slice(0, 60) + '…' : text;
+        showPopup('💬', from, short);
+    }
 }
 
 // Update tick indicator for a sent message
