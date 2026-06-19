@@ -1121,7 +1121,7 @@ footer input[type="text"] {
 
 <footer>
     <label for="serverUrl">Server:</label>
-    <input type="url" id="serverUrl" class="server-url" value="ws://localhost:8765" placeholder="ws://localhost:8765">
+    <input type="url" id="serverUrl" class="server-url" placeholder="ws://localhost:8765">
     <div class="pairing-controls" id="pairingControls">
         <button class="btn btn-primary" id="btnCreatePair">建立配對</button>
         <div class="pairing-code">
@@ -2470,6 +2470,14 @@ saveToStorage('vcc_display_name', APP.state.displayName);
 APP.updateStatus('disconnected');
 APP.showPairingUI(true);
 APP.showStatusMsg('');
+
+// Load persisted server URL
+const savedUrl = loadFromStorage('vcc_server_url', 'ws://localhost:8765');
+document.getElementById('serverUrl').value = savedUrl;
+// Save server URL on change
+document.getElementById('serverUrl').addEventListener('change', function() {
+    saveToStorage('vcc_server_url', this.value.trim());
+});
 
 // --- Sync button ---
 function requestSync() {
