@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **🖥️ 伺服器持久化** — 公告欄、檢查清單、聊天備份全部儲存至伺服器 JSON 檔案
 - **🔧 聊天備份留存** — 可設定 `CHAT_RETENTION_DAYS`（預設 7 天）
 - **🔄 WS Relay 後備** — WebRTC DataChannel 失敗時自動降級為 WebSocket 中繼傳輸
-- **⚙️ 設定分頁** — 檢視傳輸模式（P2P/Relay）及各用戶連線狀態
+- **⚙️ 設定分頁** — 檢視傳輸模式（P2P/Relay）、各用戶連線狀態、STUN 伺服器設定
+- **🌐 STUN 支援** — 預設 Google STUN 伺服器，設定頁可自訂位址
+- **📤 並行檔案傳輸** — 各對象獨立傳送不阻塞，A 傳 B 同時 C 可傳 D
 - **🔍 Debug Dump** — 一鍵輸出伺服器完整診斷資訊
 - **🕐 頁頂時鐘** — 即時顯示 hh:mm:ss 及當日日期
 - **🔗 預設配對碼** — 自動填入 1234 並在頁面載入後快速建立配對
@@ -37,10 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **🛡️ Room-State Merge** — 同步時合併而非覆寫，保留本機資料
 - **🚨 連線守衛** — 公告編輯等操作補上連線檢查
 - **🗑️ 防誤刪確認** — 公告欄及檢查清單所有刪除動作皆有確認對話框
-- **📋 公告欄連線檢查** — 編輯公告也需先建立連線
 - **📂 檔案傳輸改為需選對象** — 不再預設傳送給所有人
+- **📤 檔案傳輸並行化** — `fileSending` 改為 `Map<peerId, entry>`，各對象不互相阻塞
 - **🔊 伺服器 Verbose DEBUG** — `_debug()` 微秒精度日誌，所有 WS 收發可追蹤
 - **🔄 自動重新同步** — 斷線重連後自動發送 state-get
+- **🌐 已知限制更新** — 4 項限制各有解決方案或已實作
 
 ### 🐛 修復
 
@@ -52,31 +55,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **localStorage + 伺服器 JSON 雙重持久化**
 - **聊天備份** — 7 日留存可調，不影響 P2P 即時通訊
 - **WebRTC 優先，WS Relay 後備** — 自適應傳輸模式
+- **FileSending per-peer** — 各對象獨立傳送佇列
 
 ### 檔案統計 (vs v1.0)
 
 | 檔案 | v1.0 | 1.1.0 | 變更 |
 |------|------|-------|------|
-| VCC_Clipper.html | 1,497 行 | ~2,960 行 | +1,463 |
+| VCC_Clipper.html | 1,497 行 | ~3,100 行 | +1,600 |
 | signal_server.py | 190 行 | ~640 行 | +450 |
-| CHANGELOG.md | — | 新增 | +80 |
-| README.md | 99 行 | 161 行 | +62 |
+| CHANGELOG.md | — | 新增 | +90 |
+| README.md | 99 行 | 170 行 | +71 |
 
 ### 完整 Commit History
 
 ```
+b183e3a docs: update about page, README and CHANGELOG for v1.1.0
 1f334a4 feat(relay): add WebSocket relay fallback + settings tab
 c7d406d feat(server): add verbose DEBUG logging
-05efec8 feat(ui): add sync status indicator and manual sync button
-c5ae09d fix(ui): persist display name across F5
-cd92d48 feat(checklist): add scheduled reminder notifications
-1445b49 feat(ui): add popup notifications for new notices/checklists
-9d317e6 fix(file): no default target for file transfer
-4bafacc feat(chat): color-code different users in IM
-c5a5a03 feat(ui): add live clock hh:mm:ss and date
-8419153 docs: add CHANGELOG.md
-582c3e8 feat(checklist): add tick reset + solo reliability
-...以及 v1.0 的基礎功能
+...共 30+ 個 commits
 ```
 
 ## [1.0.0] — 初始版本

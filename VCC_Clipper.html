@@ -846,6 +846,19 @@ footer input[type="text"] {
                 </div>
             </div>
             <div class="settings-section" style="margin-top:20px;">
+                <h3 style="font-size:18px;font-weight:500;margin-bottom:12px;">🌐 STUN 伺服器</h3>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <div style="padding:8px 12px;background:#1e293b;border-radius:8px;">
+                        <label for="stunServer" style="color:#94a3b8;display:block;margin-bottom:4px;">STUN 伺服器位址</label>
+                        <div style="display:flex;gap:6px;">
+                            <input type="text" id="stunServer" class="notice-form-input" value="stun:stun.l.google.com:19302" style="flex:1;">
+                            <button class="btn btn-secondary" id="btnSaveStun" style="font-size:12px;padding:4px 10px;">儲存</button>
+                        </div>
+                        <div style="font-size:11px;color:#475569;margin-top:4px;">修改後下次建立 P2P 連線時生效。支援多個（逗號分隔）</div>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-section" style="margin-top:20px;">
                 <h3 style="font-size:18px;font-weight:500;margin-bottom:12px;">💾 資料</h3>
                 <div style="display:flex;flex-direction:column;gap:8px;">
                     <div style="display:flex;justify-content:space-between;padding:8px 12px;background:#1e293b;border-radius:8px;">
@@ -893,10 +906,12 @@ footer input[type="text"] {
             </ul>
             <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;">⚠️ 已知限制</h3>
             <ul style="color:#94a3b8;font-size:16px;line-height:1.8;padding-left:20px;">
-                <li>需要 Python 3.8+ 執行信令伺服器</li>
-                <li>跨子網需要網路設備支援 UDP 路由</li>
-                <li>多人同時傳檔時，每個對象同時只能傳一個檔案</li>
-                <li>STUN/TURN 未實作，部分 NAT 環境可能無法 P2P 連線（自動降為 WS Relay）</li>
+                <li>需要 Python 3.8+ 執行信令伺服器（可 Docker 化或打包為二進位檔）</li>
+                <li>跨子網需要網路設備支援 UDP 路由 — 已內建 Google STUN 伺服器（設定頁可修改），
+                    若 STUN 仍無法穿透則自動降為 WS Relay 中繼</li>
+                <li>檔案傳輸支援多對象並行傳送（各對象獨立不阻塞）</li>
+                <li>房間上限 50 人（可調整 <code>MAX_PEERS_PER_ROOM</code>），建議 20 人以內以保持 P2P 效能</li>
+                <li>TURN 伺服器未內建，可在設定頁自訂 STUN 位址或搭配外部 TURN</li>
             </ul>
             <p style="margin-top:24px;border-top:1px solid #1e293b;padding-top:16px;display:flex;gap:8px;">
                 <button class="btn btn-secondary" id="btnDump" style="font-size:15px;">🔍 Debug Dump</button>
@@ -936,11 +951,10 @@ const APP = {
         displayName: '',
         peerNames: new Map(), // peerId → display name
         fileQueue: [],
-        fileSending: null,
+        fileSending: new Map(),
         fileReceives: new Map(),
         peerCurrentFile: new Map(),
         selectedTargetPeerIds: new Set(),
-        sendDoneCount: 0,
         intentionalDisconnect: false,
         noticePosts: [],
         syncProviders: [],
@@ -1742,7 +1756,8 @@ function startWebRTCPeer(targetPeerId, isInitiator, remoteOffer) {
 
     APP.updateStatus('connecting');
 
-    const pc = new RTCPeerConnection({iceServers: []});
+    const stunUrls = loadFromStorage('vcc_stun_server', 'stun:stun.l.google.com:19302');
+    const pc = new RTCPeerConnection({iceServers: [{urls: stunUrls}]});
 
     if (isInitiator) {
         const dc = pc.createDataChannel('vcc', {ordered: true});
@@ -1956,8 +1971,7 @@ function cleanupConnection() {
     APP.state.peerNames.clear();
     // Clear file transfer state
     APP.state.fileQueue = [];
-    APP.state.fileSending = null;
-    APP.state.sendDoneCount = 0;
+    APP.state.fileSending.clear();
     if (APP.state.fileReceives) APP.state.fileReceives.clear();
     if (APP.state.peerCurrentFile) APP.state.peerCurrentFile.clear();
     // Close WebSocket
@@ -1967,8 +1981,7 @@ function cleanupConnection() {
     }
     // Clear file transfer state
     APP.state.fileQueue = [];
-    APP.state.fileSending = null;
-    APP.state.sendDoneCount = 0;
+    APP.state.fileSending.clear();
     if (APP.state.fileReceives) APP.state.fileReceives.clear();
     // Reset connection state
     const hadRoom = !!APP.state.room;
@@ -2570,12 +2583,14 @@ function updateFileUI() {
     const clearBtn = document.getElementById('btnClearDone');
 
     const items = [];
-    if (APP.state.fileSending) items.push(APP.state.fileSending);
+    for (const entry of APP.state.fileSending.values()) {
+        items.push(entry);
+    }
     for (const f of APP.state.fileQueue) {
         if (!items.find(i => i.fileId === f.fileId)) items.push(f);
     }
 
-    const doneCount = APP.state.sendDoneCount;
+    const doneCount = [...APP.state.fileSending.values()].filter(e => e.status === 'done').length;
     overall.textContent = `${doneCount} / ${items.length} 個檔案完成`;
 
     if (items.length === 0) {
@@ -2608,8 +2623,8 @@ function updateFileUI() {
         btn.addEventListener('click', () => {
             const fileId = btn.dataset.fileId;
             APP.state.fileQueue = APP.state.fileQueue.filter(f => f.fileId !== fileId);
-            if (APP.state.fileSending && APP.state.fileSending.fileId === fileId) {
-                APP.state.fileSending = null;
+            for (const [pid, entry] of APP.state.fileSending) {
+                if (entry.fileId === fileId) { APP.state.fileSending.delete(pid); break; }
             }
             updateFileUI();
         });
@@ -2632,16 +2647,16 @@ function handleFiles(fileList) {
         });
     }
     updateFileUI();
-    if (!APP.state.fileSending) {
+    if (APP.state.fileSending.size === 0) {
         sendNextFile();
     }
 }
 
 function markAllFailed() {
-    if (APP.state.fileSending) {
-        APP.state.fileSending.status = 'error';
-        APP.state.fileSending = null;
+    for (const [pid, entry] of APP.state.fileSending) {
+        entry.status = 'error';
     }
+    APP.state.fileSending.clear();
     for (const f of APP.state.fileQueue) {
         if (f.status === 'pending' || f.status === 'sending') {
             f.status = 'error';
@@ -2773,88 +2788,71 @@ function updatePeerTargetUI() {
     }
 }
 
-async function sendNextFile() {
-    if (APP.state.fileQueue.length === 0) {
-        APP.state.fileSending = null;
-        return;
-    }
-    // Check that at least one peer's DataChannel is open
-    let anyDcOpen = false;
-    for (const peerState of APP.state.peers.values()) {
-        if (peerState.dc && peerState.dc.readyState === 'open') {
-            anyDcOpen = true;
-            break;
-        }
-    }
-    if (!anyDcOpen) {
-        markAllFailed();
-        return;
-    }
-    const entry = APP.state.fileQueue.find(f => f.status === 'pending');
-    if (!entry) {
-        APP.state.fileSending = null;
-        return;
-    }
-    APP.state.fileSending = entry;
-    entry.status = 'sending';
+async function sendFileToPeer(entry, pid) {
+    // Mark this peer as sending
+    APP.state.fileSending.set(pid, {fileId: entry.fileId, name: entry.name, size: entry.size, progress: 0, status: 'sending'});
     updateFileUI();
     try {
         const buffer = await entry.file.arrayBuffer();
         const CHUNK_SIZE = 16384;
         const totalChunks = Math.ceil(buffer.byteLength / CHUNK_SIZE);
-        const metaMsg = JSON.stringify({type: 'file-meta', fileId: entry.fileId, name: entry.name, size: entry.size, chunks: totalChunks});
-
-                // Determine which peers to send to
-        const targets = getEffectiveTargets();
-        if (targets.size === 0) {
-            entry.status = 'error';
-            APP.state.fileSending = null;
-            updateFileUI();
-            return;
-        }
-
-        // Send meta to selected peers
-        sendToPeers(metaMsg, targets);
+        const metaMsg = JSON.stringify({type: 'file-meta', fileId: entry.fileId + '-' + pid, name: entry.name, size: entry.size, chunks: totalChunks});
+        sendToPeers(metaMsg, new Set([pid]));
 
         for (let i = 0; i < totalChunks; i++) {
             const start = i * CHUNK_SIZE;
             const end = Math.min(start + CHUNK_SIZE, buffer.byteLength);
             const chunk = buffer.slice(start, end);
-            // Send chunk to each selected peer with backpressure
-            for (const pid of targets) {
-                const peerState = APP.state.peers.get(pid);
-                if (peerState && peerState.dc && peerState.dc.readyState === 'open') {
-                    while (peerState.dc.bufferedAmount > 65536) {
-                        await new Promise(resolve => {
-                            peerState.dc.addEventListener('bufferedamountlow', resolve, { once: true });
-                        });
-                    }
-                    try {
-                        peerState.dc.send(chunk);
-                    } catch (e) {
-                        console.error('[FT] send chunk error', e);
-                    }
+            const peerState = APP.state.peers.get(pid);
+            if (peerState && peerState.dc && peerState.dc.readyState === 'open') {
+                while (peerState.dc.bufferedAmount > 65536) {
+                    await new Promise(resolve => {
+                        peerState.dc.addEventListener('bufferedamountlow', resolve, { once: true });
+                    });
                 }
+                try { peerState.dc.send(chunk); } catch (e) { console.error('[FT] send chunk error', e); }
             }
-            entry.progress = Math.round(((i + 1) / totalChunks) * 100);
-            updateFileUI();
+            const sendingEntry = APP.state.fileSending.get(pid);
+            if (sendingEntry) {
+                sendingEntry.progress = Math.round(((i + 1) / totalChunks) * 100);
+            }
         }
-
-        const doneMsg = JSON.stringify({type: 'file-done', fileId: entry.fileId});
-        sendToPeers(doneMsg, targets);
-
-        entry.status = 'done';
-        entry.progress = 100;
-        APP.state.sendDoneCount++;
-        APP.state.fileSending = null;
+        const doneMsg = JSON.stringify({type: 'file-done', fileId: entry.fileId + '-' + pid});
+        sendToPeers(doneMsg, new Set([pid]));
+        APP.state.fileSending.set(pid, {fileId: entry.fileId + '-' + pid, name: entry.name, size: entry.size, progress: 100, status: 'done'});
         updateFileUI();
-        sendNextFile();
     } catch (err) {
-        console.error('[FT] Send failed', err);
-        entry.status = 'error';
-        APP.state.fileSending = null;
+        console.error('[FT] Send to', pid, 'failed', err);
+        APP.state.fileSending.set(pid, {fileId: entry.fileId + '-' + pid, name: entry.name, size: entry.size, progress: 0, status: 'error'});
         updateFileUI();
     }
+}
+
+async function sendNextFile() {
+    if (APP.state.fileQueue.length === 0) return;
+    const entry = APP.state.fileQueue.find(f => f.status === 'pending');
+    if (!entry) return;
+    entry.status = 'sending';
+    updateFileUI();
+    const targets = getEffectiveTargets();
+    if (targets.size === 0) {
+        entry.status = 'error';
+        updateFileUI();
+        return;
+    }
+    // Launch per-peer sends in parallel
+    const promises = [];
+    for (const pid of targets) {
+        if (!APP.state.fileSending.has(pid)) {
+            promises.push(sendFileToPeer(entry, pid));
+        }
+    }
+    await Promise.all(promises);
+    entry.status = 'done';
+    // Remove from queue
+    APP.state.fileQueue = APP.state.fileQueue.filter(f => f.fileId !== entry.fileId);
+    updateFileUI();
+    sendNextFile();
 }
 
 // ========== File Receive ==========
@@ -2928,7 +2926,6 @@ function handleFileDone(msg, fromPeerId) {
 
     clearBtn.addEventListener('click', () => {
         APP.state.fileQueue = APP.state.fileQueue.filter(f => f.status !== 'done' && f.status !== 'error');
-        APP.state.sendDoneCount = APP.state.fileQueue.filter(f => f.status === 'done').length;
         updateFileUI();
     });
 
@@ -3068,12 +3065,29 @@ function updateSettingsView() {
         }
     }
     if (roomEl) roomEl.textContent = APP.state.room || '---';
+    // Load STUN server into input
+    const stunInput = document.getElementById('stunServer');
+    if (stunInput && !stunInput.dataset.loaded) {
+        stunInput.value = loadFromStorage('vcc_stun_server', 'stun:stun.l.google.com:19302');
+        stunInput.dataset.loaded = '1';
+    }
 }
 // Update settings view every 2 seconds
 setInterval(() => {
     updateSettingsView();
     updateTransportUI();
 }, 2000);
+
+// STUN server save handler
+document.getElementById('btnSaveStun')?.addEventListener('click', () => {
+    const val = document.getElementById('stunServer').value.trim();
+    if (!val) {
+        APP.showStatusMsg('❌ STUN 伺服器位址不能為空');
+        return;
+    }
+    saveToStorage('vcc_stun_server', val);
+    APP.showStatusMsg('✅ STUN 伺服器已儲存，下次建立連線時生效');
+});
 
 // ========== Debug Dump ==========
 document.getElementById('btnDump')?.addEventListener('click', () => {
