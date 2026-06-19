@@ -2802,7 +2802,7 @@ function connectToPeer(targetPeerId) {
 function removePeer(peerId) {
     const peerState = APP.state.peers.get(peerId);
     if (!peerState) return;
-    const displayName = APP.state.peerNames.get(peerId) || peerId;
+    const displayName = (APP.state.peerNames.get(peerId) || peerId) + ' (' + peerId + ')';
     if (peerState.dc) {
         try { peerState.dc.close(); } catch (_) {}
     }
@@ -4114,7 +4114,7 @@ function updateTransportUI() {
             const name = APP.state.peerNames.get(pid) || pid;
             const icon = m === 'p2p' ? '🟢' : m === 'relay' ? '🟡' : '⚪';
             const label = m === 'p2p' ? 'P2P' : m === 'relay' ? 'Relay' : '連線中';
-            return '<div>' + icon + ' ' + escapeHtml(name) + '：<span style="color:#94a3b8">' + label + '</span></div>';
+            return '<div>' + icon + ' ' + escapeHtml(name + ' (' + pid + ')') + '：<span style="color:#94a3b8">' + label + '</span></div>';
         }).join('');
     }
 }
@@ -4202,7 +4202,7 @@ function updatePeerTargetUI() {
         const selected = APP.state.selectedTargetPeerIds.has(pid);
         btn.className = 'peer-target-btn' + (selected ? ' selected' : '');
         const dName = APP.state.peerNames.get(pid) || pid;
-        btn.textContent = `🖥 ${dName}`;
+        btn.textContent = `🖥 ${dName} (${pid})`;
         btn.title = pid;
         btn.dataset.peerId = pid;
         btn.addEventListener('click', () => {
@@ -4333,7 +4333,7 @@ function handleFileMeta(msg, fromPeerId) {
     APP.state.peerCurrentFile.set(fromPeerId, msg.fileId);
     // Show popup notification + update UI
     const displayName = APP.state.peerNames.get(fromPeerId) || fromPeerId;
-    showPopup('📁', '接收檔案中', displayName + ' 正在傳送：' + msg.name);
+    showPopup('📁', '接收檔案中', displayName + ' (' + fromPeerId + ') 正在傳送：' + msg.name);
     updateFileUI();
 }
 
@@ -4645,7 +4645,7 @@ function updateSettingsView() {
                 const isSelf = pid === APP.state.myPeerId;
                 return '<div style="display:flex;align-items:center;gap:8px;padding:2px 0;">'
                     + '<span style="color:#22c55e;">🟢</span>'
-                    + '<span>' + escapeHtml(name || pid) + '（' + escapeHtml(pid) + '）</span>'
+                    + '<span>' + escapeHtml((name || pid) + ' (' + pid + ')') + '</span>'
                     + (isSelf ? ' <span style="color:#64748b;font-size:12px;">(你)</span>' : '')
                     + '</div>';
             }).join('');
