@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **NTP 伺服器驗證** — `_ntp_query()` 回傳 `(offset, is_valid)` tuple，區分「偏移為零」與「查詢失敗」
 - **NTP 驗證可視化** — 管理面板偏移量以 🟢 綠色（正常）/ 🔴 紅色（無回應）顯示，hover 可查看 tooltip
 - **NTP 儲存時即時驗證** — 儲存 NTP 伺服器後即顯示連線成功或失敗的明確訊息
+- **內建 HTTP Server** — 伺服器自動在 port 8766 提供 `clipper.html` 及靜態檔案，無需手動開啟檔案
 
 ## [1.1.0] — 2026-06-19
 

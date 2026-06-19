@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timezone, timedelta
 
 import websockets
+import mimetypes
 
 
 # room_id -> {peerId: {"ws": websocket, "joinedAt": "ISO timestamp"}}
@@ -284,6 +285,55 @@ def _generate_peer_id():
             return pid
 
 
+# Mini HTTP server — serves clipper.html and static files on port 8766
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+async def _mini_http(reader, writer):
+    """Serve a single HTTP request. Read first line, serve file, close."""
+    try:
+        line = await asyncio.wait_for(reader.readline(), timeout=5)
+        if not line or not line.startswith(b"GET "):
+            writer.close(); return
+        parts = line.decode(errors="replace").strip().split(" ")
+        path = parts[1] if len(parts) > 1 else "/"
+        # Consume remaining headers
+        while True:
+            hdr = await reader.readline()
+            if hdr == b"\r\n" or not hdr:
+                break
+        if path == "/":
+            path = "/clipper.html"
+        safe_path = os.path.normpath(os.path.join(_SCRIPT_DIR, path.lstrip("/")))
+        if not safe_path.startswith(_SCRIPT_DIR) or not os.path.isfile(safe_path):
+            body = b"Not Found"; status = b"404 Not Found"; ct = b"text/plain"
+        else:
+            ct_val, _ = mimetypes.guess_type(safe_path)
+            ct = (ct_val or "text/html").encode()
+            with open(safe_path, "rb") as f:
+                body = f.read()
+            status = b"200 OK"
+        resp = (b"HTTP/1.1 " + status + b"\r\n"
+                b"Content-Type: " + ct + b"\r\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                b"Connection: close\r\n\r\n") + body
+        writer.write(resp); await writer.drain()
+    except Exception:
+        pass
+    finally:
+        try: writer.close()
+        except: pass
+
+
+def _generate_peer_id():
+    """Generate a unique 4-char uppercase alphanumeric peer ID."""
+    chars = string.ascii_uppercase + string.digits
+    while True:
+        pid = "".join(random.choices(chars, k=4))
+        if pid not in peer_ids:
+            peer_ids.add(pid)
+            return pid
+
+
 async def handler(websocket):
     """Handle a WebSocket connection."""
     room_id = None
@@ -297,10 +347,6 @@ async def handler(websocket):
 
             if msg_type == "generate":
                 code = str(random.randint(1000, 9999))
-                while code in rooms:
-                    code = str(random.randint(1000, 9999))
-                await websocket.send(json.dumps({"type": "generated", "room": code}))
-                _debug(f"→ TX generated room={code}")
 
             elif msg_type == "join":
                 rid = data.get("room")
@@ -1197,18 +1243,13 @@ async def main():
     _log('STARTUP', f'Data: {total_notices} notices, {total_boards} boards, {total_chats} chat backups')
     _log('STARTUP', f'Chat retention: {CHAT_RETENTION_DAYS} days')
     _log('STARTUP', f'DEBUG mode: {"ON" if DEBUG else "OFF"}')
-    _log('STARTUP', 'listening on ws://localhost:8765')
+    _log('STARTUP', 'listening on ws://localhost:8765  |  http://localhost:8766')
 
     loop = asyncio.get_running_loop()
     stop = loop.create_future()
 
-    def _shutdown():
-        _save_state()
-        _log('SHUTDOWN', 'Server shutting down, state saved')
-        stop.set_result(None)
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _shutdown)
+    # Start HTTP server on port 8766
+    http_server = await asyncio.start_server(_mini_http, "0.0.0.0", 8766)
 
     async with websockets.serve(handler, "0.0.0.0", 8765):
         await stop
