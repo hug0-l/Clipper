@@ -889,6 +889,7 @@ async def handler(websocket):
                 try:
                     await rooms[rid][target]["ws"].send(json.dumps(out))
                     _debug(f"→ TX relay-data to={target} from={my_peer_id} ({payload.get('type','?')})")
+                    _log('RELAY', f'{my_peer_id} → {target} ({payload.get("type","?")})')
                 except websockets.exceptions.ConnectionClosed:
                     pass
 

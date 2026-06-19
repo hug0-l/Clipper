@@ -4111,10 +4111,9 @@ function broadcastToPeers(jsonStr) {
 }
 
 function sendToPeers(jsonStr, peerIds) {
+    // Relay-only: always use WS relay (no DC path)
     for (const pid of peerIds) {
-        if (!sendToPeerDC(pid, jsonStr)) {
-            relayToPeer(pid, jsonStr);
-        }
+        relayToPeer(pid, jsonStr);
     }
 }
 
