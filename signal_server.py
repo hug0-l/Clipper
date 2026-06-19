@@ -2,14 +2,16 @@
 """Clipper signaling server - N-peer WebSocket room for WebRTC Full Mesh."""
 
 import asyncio
+import hashlib
 import json
+import logging
 import os
 import random
 import signal
 import sqlite3
 import string
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import websockets
 
@@ -24,12 +26,83 @@ room_data = {}
 
 CHAT_RETENTION_DAYS = 7    # How long to keep chat backups (adjustable)
 DB_PATH = "clipper_data.db"
+LOG_DIR = "logs"
+LOG_RETENTION_HOURS = 24
+DEFAULT_ADMIN_PASSWORD = "12345"
 DEBUG = True   # Toggle verbose debug output
+_config = {"chatRetentionDays": CHAT_RETENTION_DAYS}  # mutable config for runtime changes
 
+
+def _setup_logging():
+    global _log_file
+    os.makedirs(LOG_DIR, exist_ok=True)
+    log_path = os.path.join(LOG_DIR, f"clipper_{datetime.now().strftime('%Y%m%d')}.log")
+    _log_file = open(log_path, 'a', encoding='utf-8')
+    return log_path
+
+def _rotate_logs():
+    """Remove log files older than LOG_RETENTION_HOURS."""
+    now = time.time()
+    cutoff = now - LOG_RETENTION_HOURS * 3600
+    if os.path.isdir(LOG_DIR):
+        for fname in os.listdir(LOG_DIR):
+            fpath = os.path.join(LOG_DIR, fname)
+            if fname.endswith('.log') and os.path.getmtime(fpath) < cutoff:
+                os.remove(fpath)
+                print(f"[Log rotation] Removed old log: {fname}")
 
 def _log(category, message):
     ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{ts}] [{category}] {message}")
+    line = f"[{ts}] [{category}] {message}"
+    print(line)
+    if hasattr(_log, '_file') and _log._file:
+        try:
+            _log._file.write(line + '\n')
+            _log._file.flush()
+        except:
+            pass
+
+
+_log._file = None
+
+def _hash_password(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+def _init_admin_password():
+    """Insert default admin password if not set."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS admin (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT OR IGNORE INTO admin VALUES ('password', ?)", (_hash_password(DEFAULT_ADMIN_PASSWORD),))
+        conn.commit()
+    finally:
+        conn.close()
+
+def _verify_admin_password(pw):
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute("SELECT value FROM admin WHERE key='password'").fetchone()
+        return row and row[0] == _hash_password(pw)
+    finally:
+        conn.close()
+
+def _set_admin_password(new_pw):
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("INSERT OR REPLACE INTO admin VALUES ('password', ?)", (_hash_password(new_pw),))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+def _get_logs(count=50):
+    """Return the last N lines from today's log file."""
+    today_log = os.path.join(LOG_DIR, f"clipper_{datetime.now().strftime('%Y%m%d')}.log")
+    if not os.path.exists(today_log):
+        return ["(no logs yet)"]
+    with open(today_log, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    return [l.rstrip('\n') for l in lines[-count:]]
 
 
 def _debug(message):
@@ -271,8 +344,9 @@ async def handler(websocket):
                     "serverReceivedAt": time.time() * 1000,
                 }
                 room_data[rid]["chatMessages"].append(backup_msg)
-                # Enforce retention: remove messages older than CHAT_RETENTION_DAYS
-                cutoff = (time.time() - CHAT_RETENTION_DAYS * 86400) * 1000
+                # Enforce retention: remove messages older than configured period
+                retention = _config.get("chatRetentionDays", CHAT_RETENTION_DAYS)
+                cutoff = (time.time() - retention * 86400) * 1000
                 room_data[rid]["chatMessages"] = [
                     m for m in room_data[rid]["chatMessages"]
                     if m["timestamp"] > cutoff
@@ -588,7 +662,8 @@ async def handler(websocket):
                 _ensure_room_data(rid)
                 since = data.get("since")
                 if since is None:
-                    cutoff = (time.time() - CHAT_RETENTION_DAYS * 86400) * 1000
+                    retention = _config.get("chatRetentionDays", CHAT_RETENTION_DAYS)
+                    cutoff = (time.time() - retention * 86400) * 1000
                     filtered = [
                         m for m in room_data[rid].get("chatMessages", [])
                         if m["timestamp"] > cutoff
@@ -676,6 +751,75 @@ async def handler(websocket):
                         _debug(f"→ TX file-cancel to={target} from={my_peer_id} fileId={data.get('fileId')}")
                     except websockets.exceptions.ConnectionClosed:
                         pass
+
+            elif msg_type == "admin-login":
+                pw = data.get("password", "")
+                if _verify_admin_password(pw):
+                    await websocket.send(json.dumps({
+                        "type": "admin-login-result",
+                        "success": True,
+                        "message": "Authenticated",
+                        "serverInfo": {
+                            "version": "1.1.0",
+                            "uptime": int(time.time() - _start_time) if hasattr(_log, '_start') else 0,
+                            "activeRooms": len(rooms),
+                            "activePeers": sum(len(p) for p in rooms.values()),
+                            "dataRooms": len(room_data),
+                            "chatRetentionDays": CHAT_RETENTION_DAYS,
+                            "debugMode": DEBUG,
+                        }
+                    }))
+                    _log('ADMIN', f'{my_peer_id} logged in successfully')
+                else:
+                    await websocket.send(json.dumps({"type": "admin-login-result", "success": False, "message": "密碼錯誤"}))
+                    _log('ADMIN', f'{my_peer_id} login FAILED')
+
+            elif msg_type == "admin-logs":
+                if not _verify_admin_password(data.get("password", "")):
+                    await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
+                    continue
+                count = data.get("count", 50)
+                logs = _get_logs(count)
+                await websocket.send(json.dumps({"type": "admin-logs-result", "logs": logs}))
+
+            elif msg_type == "admin-change-password":
+                old_pw = data.get("oldPassword", "")
+                new_pw = data.get("newPassword", "")
+                if not new_pw or len(new_pw) < 4:
+                    await websocket.send(json.dumps({"type": "admin-change-password-result", "success": False, "message": "新密碼至少需要 4 個字元"}))
+                    continue
+                if not _verify_admin_password(old_pw):
+                    await websocket.send(json.dumps({"type": "admin-change-password-result", "success": False, "message": "舊密碼錯誤"}))
+                    continue
+                _set_admin_password(new_pw)
+                await websocket.send(json.dumps({"type": "admin-change-password-result", "success": True, "message": "密碼已更改"}))
+                _log('ADMIN', f'{my_peer_id} changed password')
+
+            elif msg_type == "admin-get-config":
+                if not _verify_admin_password(data.get("password", "")):
+                    await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
+                    continue
+                await websocket.send(json.dumps({
+                    "type": "admin-config",
+                    "config": {
+                        "chatRetentionDays": _config["chatRetentionDays"],
+                        "maxPeersPerRoom": MAX_PEERS_PER_ROOM,
+                        "debug": DEBUG,
+                        "logRetentionHours": LOG_RETENTION_HOURS,
+                        "dataFile": DB_PATH,
+                    }
+                }))
+
+            elif msg_type == "admin-set-config":
+                if not _verify_admin_password(data.get("password", "")):
+                    await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
+                    continue
+                cfg = data.get("config", {})
+                # Only allow safe overrides (use mutable dict to avoid global issues)
+                if "chatRetentionDays" in cfg:
+                    _config["chatRetentionDays"] = int(cfg["chatRetentionDays"])
+                await websocket.send(json.dumps({"type": "admin-set-config-result", "success": True, "message": "設定已更新"}))
+                _log('ADMIN', f'{my_peer_id} updated server config')
 
             elif msg_type == "dump":
                 iso_ts = datetime.now(timezone.utc).isoformat()
@@ -785,11 +929,25 @@ async def _heartbeat_check():
                     del rooms[rid]
 
 
+async def _periodic_log_rotation():
+    """Rotate logs every hour."""
+    while True:
+        await asyncio.sleep(3600)
+        _rotate_logs()
+
+
 async def main():
+    global _start_time
+    _start_time = time.time()
+    log_path = _setup_logging()
+    _log._file = open(log_path, 'a', encoding='utf-8')
+    _rotate_logs()
     _init_db()
+    _init_admin_password()
     _load_state()
     _migrate_room_data()
     asyncio.create_task(_heartbeat_check())
+    asyncio.create_task(_periodic_log_rotation())
     total_notices = sum(len(r.get("noticePosts", [])) for r in room_data.values())
     total_boards = sum(len(r.get("checklists", [])) for r in room_data.values())
     total_chats = sum(len(r.get("chatMessages", [])) for r in room_data.values())

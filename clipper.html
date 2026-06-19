@@ -912,6 +912,17 @@ footer input[type="text"] {
 .tag-badge { font-size:12px; padding:1px 6px; border-radius:8px; background:#1e293b; color:#94a3b8; border:1px solid #334155; }
 .notice-card-category { display:flex; gap:6px; align-items:center; margin-bottom:4px; }
 .notice-card-tags { display:flex; gap:4px; flex-wrap:wrap; margin:4px 0; }
+/* --- Admin Panel --- */
+.admin-container { max-width:640px; margin:0 auto; display:flex; flex-direction:column; flex:1; }
+.admin-login { display:flex; flex-direction:column; justify-content:center; flex:1; }
+.admin-panel { display:flex; flex-direction:column; flex:1; }
+.admin-tab-btn { background:transparent; border:none; color:#94a3b8; cursor:pointer; font-size:14px; padding:6px 14px; border-radius:6px; font-family:inherit; transition:all 0.1s; }
+.admin-tab-btn:hover { color:#e2e8f0; background:rgba(255,255,255,0.05); }
+.admin-tab-btn.active { color:#e2e8f0; background:#1e293b; }
+.admin-pane { display:none; }
+.admin-pane-active { display:block; }
+.log-viewer::-webkit-scrollbar { width:4px; }
+.log-viewer::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.08); border-radius:2px; }
 </style>
 </head>
 <body>
@@ -935,6 +946,7 @@ footer input[type="text"] {
     <button class="tab-btn" data-target="noticeboard">📋 公告欄</button>
     <button class="tab-btn" data-target="checklist">✅ 檢查清單</button>
     <button class="tab-btn" data-target="settings">⚙️ 設定</button>
+    <button class="tab-btn" data-target="admin">🔐 管理</button>
     <button class="tab-btn" data-target="about">ℹ️ 關於</button>
     <div class="tab-spacer"></div>
 </nav>
@@ -1100,6 +1112,77 @@ footer input[type="text"] {
                     <div style="display:flex;justify-content:space-between;padding:8px 12px;background:#1e293b;border-radius:8px;">
                         <span style="color:#94a3b8;">房間代碼</span>
                         <span id="settingsRoomCode" style="font-weight:500;color:#38bdf8;">---</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <section class="tab-pane" data-tab="admin">
+        <div class="admin-container">
+            <div class="admin-login" id="adminLogin">
+                <div style="max-width:360px;margin:40px auto;">
+                    <h2 style="font-size:22px;font-weight:600;margin-bottom:8px;">🔐 管理員登入</h2>
+                    <p style="font-size:14px;color:#f59e0b;margin-bottom:16px;background:#451a03;border-radius:8px;padding:10px 14px;line-height:1.5;">
+                        ⚠️ 首次使用請立即修改預設密碼<br>
+                        <span style="font-size:12px;">預設密碼: <code>12345</code></span>
+                    </p>
+                    <input type="password" class="notice-form-input" id="adminPw" placeholder="管理員密碼" style="margin-bottom:10px;">
+                    <button class="btn btn-primary" id="btnAdminLogin" style="width:100%;">登入</button>
+                    <div id="adminLoginError" style="color:#ef4444;font-size:14px;margin-top:8px;display:none;"></div>
+                </div>
+            </div>
+            <div class="admin-panel" id="adminPanel" style="display:none;">
+                <h2 style="font-size:22px;font-weight:600;margin-bottom:16px;">🔐 管理面板</h2>
+                <div class="admin-tabs" style="display:flex;gap:4px;margin-bottom:16px;">
+                    <button class="admin-tab-btn active" data-admintab="status">📊 狀態</button>
+                    <button class="admin-tab-btn" data-admintab="logs">📋 日誌</button>
+                    <button class="admin-tab-btn" data-admintab="config">⚙️ 設定</button>
+                    <button class="admin-tab-btn" data-admintab="password">🔑 更改密碼</button>
+                </div>
+                <!-- Status -->
+                <div class="admin-pane admin-pane-active" id="adminPaneStatus">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1e293b;border-radius:8px;"><span style="color:#94a3b8;">伺服器版本</span><span id="adminVersion" style="font-weight:500;">---</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1e293b;border-radius:8px;"><span style="color:#94a3b8;">運行時間</span><span id="adminUptime" style="font-weight:500;">---</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1e293b;border-radius:8px;"><span style="color:#94a3b8;">活躍房間</span><span id="adminActiveRooms" style="font-weight:500;">---</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1e293b;border-radius:8px;"><span style="color:#94a3b8;">在線用戶</span><span id="adminActivePeers" style="font-weight:500;">---</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1e293b;border-radius:8px;"><span style="color:#94a3b8;">資料房間數</span><span id="adminDataRooms" style="font-weight:500;">---</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1e293b;border-radius:8px;"><span style="color:#94a3b8;">聊天留存</span><span id="adminRetention" style="font-weight:500;">---</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1e293b;border-radius:8px;"><span style="color:#94a3b8;">Debug 模式</span><span id="adminDebug" style="font-weight:500;">---</span></div>
+                    </div>
+                </div>
+                <!-- Logs -->
+                <div class="admin-pane" id="adminPaneLogs" style="display:none;">
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                        <button class="btn btn-secondary" id="btnRefreshLogs" style="font-size:12px;padding:4px 10px;">🔄 刷新</button>
+                        <span style="font-size:12px;color:#64748b;">最近 50 行</span>
+                    </div>
+                    <div class="log-viewer" id="logViewer" style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;color:#94a3b8;max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;line-height:1.6;"></div>
+                </div>
+                <!-- Config -->
+                <div class="admin-pane" id="adminPaneConfig" style="display:none;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#1e293b;border-radius:8px;">
+                            <span style="color:#94a3b8;">聊天備份留存</span>
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <input type="number" id="adminConfigRetention" style="width:60px;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:4px 8px;border-radius:6px;font-size:14px;font-family:inherit;text-align:center;"> <span style="color:#64748b;font-size:12px;">天</span>
+                                <button class="btn btn-secondary" id="btnSaveConfig" style="font-size:11px;padding:3px 8px;">儲存</button>
+                            </div>
+                        </div>
+                        <div style="padding:10px 14px;background:#1e293b;border-radius:8px;color:#64748b;font-size:13px;">
+                            <span>日誌路徑: <code id="adminLogPath" style="color:#94a3b8;"></code></span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Password -->
+                <div class="admin-pane" id="adminPanePassword" style="display:none;">
+                    <div style="max-width:360px;">
+                        <p style="color:#f59e0b;font-size:14px;margin-bottom:12px;background:#451a03;border-radius:8px;padding:10px 14px;">⚠️ 預設密碼 <code>12345</code> 請立即修改</p>
+                        <input type="password" class="notice-form-input" id="adminOldPw" placeholder="目前密碼">
+                        <input type="password" class="notice-form-input" id="adminNewPw" placeholder="新密碼（至少 4 字元）">
+                        <input type="password" class="notice-form-input" id="adminNewPw2" placeholder="確認新密碼">
+                        <button class="btn btn-primary" id="btnChangePw" style="width:100%;">更改密碼</button>
+                        <div id="adminPwResult" style="margin-top:8px;font-size:14px;"></div>
                     </div>
                 </div>
             </div>
@@ -2211,6 +2294,7 @@ function handleWsMessage(data) {
             break;
 
         default:
+            if (typeof handleAdminMessage === 'function') handleAdminMessage(data);
             console.log('[WS] Unknown message type:', type);
     }
     } catch (e) {
@@ -3987,6 +4071,118 @@ document.getElementById('btnSaveStun')?.addEventListener('click', () => {
     saveToStorage('vcc_stun_server', val);
     APP.showStatusMsg('✅ STUN 伺服器已儲存，下次建立連線時生效');
 });
+
+// ========== Admin Panel ==========
+let _adminPassword = '';
+let _adminLoggedIn = false;
+
+// Admin tab switching
+document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.admin-tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.admin-pane').forEach(p => p.style.display = 'none');
+        const target = document.getElementById('adminPane' + btn.dataset.admintab.charAt(0).toUpperCase() + btn.dataset.admintab.slice(1));
+        if (target) target.style.display = 'block';
+    });
+});
+
+function handleAdminMessage(data) {
+    if (data.type === 'admin-login-result') {
+        if (data.success) {
+            _adminPassword = document.getElementById('adminPw').value;
+            _adminLoggedIn = true;
+            document.getElementById('adminLogin').style.display = 'none';
+            document.getElementById('adminPanel').style.display = 'block';
+            document.getElementById('adminLoginError').style.display = 'none';
+            // Populate status
+            if (data.serverInfo) {
+                document.getElementById('adminVersion').textContent = data.serverInfo.version || '---';
+                document.getElementById('adminUptime').textContent = data.serverInfo.uptime ? Math.floor(data.serverInfo.uptime / 3600) + ' 小時 ' + Math.floor((data.serverInfo.uptime % 3600) / 60) + ' 分' : '---';
+                document.getElementById('adminActiveRooms').textContent = data.serverInfo.activeRooms || 0;
+                document.getElementById('adminActivePeers').textContent = data.serverInfo.activePeers || 0;
+                document.getElementById('adminDataRooms').textContent = data.serverInfo.dataRooms || 0;
+                document.getElementById('adminRetention').textContent = data.serverInfo.chatRetentionDays + ' 天' || '---';
+                document.getElementById('adminDebug').textContent = data.serverInfo.debugMode ? '🟢 ON' : '🔴 OFF';
+            }
+            // Refresh logs automatically
+            sendWsMessage({type: 'admin-logs', password: _adminPassword, count: 50});
+            sendWsMessage({type: 'admin-get-config', password: _adminPassword});
+        } else {
+            document.getElementById('adminLoginError').textContent = data.message || '❌ 登入失敗';
+            document.getElementById('adminLoginError').style.display = 'block';
+        }
+    } else if (data.type === 'admin-logs-result') {
+        const viewer = document.getElementById('logViewer');
+        if (viewer && data.logs) {
+            viewer.innerHTML = data.logs.map(l => escapeHtml(l)).join('<br>');
+            viewer.scrollTop = viewer.scrollHeight;
+        }
+    } else if (data.type === 'admin-config') {
+        if (data.config) {
+            document.getElementById('adminConfigRetention').value = data.config.chatRetentionDays || 7;
+            document.getElementById('adminLogPath').textContent = data.config.dataFile || '---';
+        }
+    } else if (data.type === 'admin-change-password-result') {
+        const el = document.getElementById('adminPwResult');
+        if (el) {
+            el.innerHTML = data.success
+                ? '<span style="color:#22c55e;">✅ ' + data.message + '</span>'
+                : '<span style="color:#ef4444;">❌ ' + data.message + '</span>';
+            if (data.success) {
+                _adminPassword = document.getElementById('adminNewPw').value;
+                document.getElementById('adminOldPw').value = '';
+                document.getElementById('adminNewPw').value = '';
+                document.getElementById('adminNewPw2').value = '';
+            }
+        }
+    } else if (data.type === 'admin-set-config-result') {
+        APP.showStatusMsg(data.success ? '✅ ' + data.message : '❌ ' + data.message);
+    }
+}
+
+// Admin login
+document.getElementById('btnAdminLogin')?.addEventListener('click', () => {
+    const pw = document.getElementById('adminPw').value.trim();
+    if (!pw) { document.getElementById('adminLoginError').textContent = '❌ 請輸入密碼'; document.getElementById('adminLoginError').style.display = 'block'; return; }
+    sendWsMessage({type: 'admin-login', password: pw});
+});
+document.getElementById('adminPw')?.addEventListener('keydown', function(e) { if (e.key === 'Enter') document.getElementById('btnAdminLogin')?.click(); });
+
+// Refresh logs
+document.getElementById('btnRefreshLogs')?.addEventListener('click', () => {
+    if (_adminPassword) sendWsMessage({type: 'admin-logs', password: _adminPassword, count: 50});
+});
+
+// Save config
+document.getElementById('btnSaveConfig')?.addEventListener('click', () => {
+    if (!_adminPassword) return;
+    const retention = parseInt(document.getElementById('adminConfigRetention').value);
+    if (isNaN(retention) || retention < 1) { APP.showStatusMsg('❌ 請輸入有效的天數'); return; }
+    sendWsMessage({type: 'admin-set-config', password: _adminPassword, config: {chatRetentionDays: retention}});
+});
+
+// Change password
+document.getElementById('btnChangePw')?.addEventListener('click', () => {
+    const oldPw = document.getElementById('adminOldPw').value;
+    const newPw = document.getElementById('adminNewPw').value;
+    const newPw2 = document.getElementById('adminNewPw2').value;
+    const el = document.getElementById('adminPwResult');
+    if (!oldPw || !newPw) { el.innerHTML = '<span style="color:#ef4444;">❌ 請填寫所有欄位</span>'; return; }
+    if (newPw !== newPw2) { el.innerHTML = '<span style="color:#ef4444;">❌ 兩次密碼輸入不一致</span>'; return; }
+    if (newPw.length < 4) { el.innerHTML = '<span style="color:#ef4444;">❌ 新密碼至少需要 4 個字元</span>'; return; }
+    sendWsMessage({type: 'admin-change-password', password: _adminPassword, oldPassword: oldPw, newPassword: newPw});
+});
+
+// Intercept WS messages for admin (called from handleWsMessage)
+// We patch the switch by adding a catch-all in the default case
+// Instead, extend the existing handler
+(function() {
+    const origHandle = window.handleWsMessage;
+    if (origHandle) return;
+    // Inject admin handler into the WS router by patching the default case
+    console.log('[Admin] Ready — use admin messages via WS');
+})();
 
 // ========== Debug Dump ==========
 document.getElementById('btnDump')?.addEventListener('click', () => {
