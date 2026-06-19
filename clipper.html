@@ -990,6 +990,7 @@ footer input[type="text"] {
         <span class="clock-time" id="clockTime">00:00:00</span>
         <span class="clock-date" id="clockDate"></span>
     </div>
+    <span class="peer-id-badge" id="peerIdBadge" style="font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:14px;color:#64748b;display:none;">🆔 <span id="peerIdSpan">---</span></span>
 
     <div class="room-code">代碼: <span id="roomCode">---</span></div>
 </header>
@@ -1444,7 +1445,7 @@ const APP = {
         badge.classList.remove('connected', 'connecting', 'disconnected');
         if (status === 'connected') {
             badge.className = 'status-badge connected';
-            badge.textContent = '🟢 已連線 (Relay)';
+            badge.textContent = '🟢 已連線';
             APP.state.connected = true;
         } else if (status === 'connecting') {
             badge.className = 'status-badge connecting';
@@ -2320,6 +2321,11 @@ function handleWsMessage(data) {
             APP.state.myPeerId = data.peerId;
             APP.setRoomCode(data.room);
             APP.showStatusMsg(`已加入配對 (我的 ID: ${data.peerId})`);
+            // Show peerId in header
+            const peerIdSpan = document.getElementById('peerIdSpan');
+            const peerIdBadge = document.getElementById('peerIdBadge');
+            if (peerIdSpan) peerIdSpan.textContent = data.peerId;
+            if (peerIdBadge) peerIdBadge.style.display = '';
             // Reload room-scoped data from localStorage
             APP.state.noticePosts = loadFromStorage(APP.roomKey('vcc_notice_posts'), []);
             APP.state.checklists = loadFromStorage(APP.roomKey('vcc_checklists'), []);
@@ -2643,15 +2649,28 @@ function handleWsMessage(data) {
             break;
 
         case 'offer':
-            // Relay-only mode — ignore WebRTC offers from other peers
+            APP.showStatusMsg('收到連線請求');
+            startWebRTCPeer(data.from, false, data.data);
             break;
 
         case 'answer':
-            // Relay-only mode — ignore WebRTC answers
+            {
+                const peerState = APP.state.peers.get(data.from);
+                if (peerState && peerState.pc && data.data) {
+                    peerState.pc.setRemoteDescription(new RTCSessionDescription(data.data))
+                        .catch(e => console.error('[PC] setRemoteDescription(answer) error', e));
+                }
+            }
             break;
 
         case 'ice-candidate':
-            // Relay-only mode — ignore ICE candidates
+            {
+                const peerState = APP.state.peers.get(data.from);
+                if (peerState && peerState.pc && data.data) {
+                    peerState.pc.addIceCandidate(new RTCIceCandidate(data.data))
+                        .catch(e => console.error('[PC] addIceCandidate error', e));
+                }
+            }
             break;
 
         case 'peer_left':
@@ -2768,13 +2787,16 @@ function handleWsMessage(data) {
 
 function connectToPeer(targetPeerId) {
     if (APP.state.peers.has(targetPeerId) || targetPeerId === APP.state.myPeerId) return;
-    // Relay-only mode — no WebRTC PeerConnection
-    APP.state.peers.set(targetPeerId, { pc: null, dc: null, connected: false, relay: true });
-    APP.updatePeerCount();
-    if (!APP.state.connected) {
-        APP.updateStatus('connected');
-        APP.showPairingUI(false);
+    // Lower peerId creates the offer (initiator), higher waits (responder)
+    if (APP.state.myPeerId < targetPeerId) {
+        console.log('[Mesh] Initiating connection to', targetPeerId);
+        startWebRTCPeer(targetPeerId, true, null);
+    } else {
+        console.log('[Mesh] Waiting for offer from', targetPeerId);
+        // Create a placeholder so we know about this peer
+        APP.state.peers.set(targetPeerId, { pc: null, dc: null, connected: false, relay: false });
     }
+    APP.updatePeerCount();
 }
 
 function removePeer(peerId) {
@@ -3085,6 +3107,9 @@ function cleanupConnection() {
     APP.state.connected = false;
     APP.state.intentionalDisconnect = false;
     APP.setRoomCode(null);
+    // Hide peerId badge
+    var peerIdBadge2 = document.getElementById('peerIdBadge');
+    if (peerIdBadge2) peerIdBadge2.style.display = 'none';
     APP.updateStatus('disconnected');
     APP.showPairingUI(true);
     APP.updatePeerCount();
@@ -4061,9 +4086,12 @@ function markAllFailed() {
     updateFileUI();
 }
 
-// ========== Transport: WS Relay Only ==========
+// ========== Transport: WebRTC DC with WS Relay Fallback ==========
 function getPeerTransport(pid) {
-    return APP.state.peers.has(pid) ? 'relay' : 'unknown';
+    const ps = APP.state.peers.get(pid);
+    if (!ps) return 'unknown';
+    if (ps.dc && ps.dc.readyState === 'open') return 'p2p';
+    return ps.relay ? 'relay' : 'connecting';
 }
 function updateTransportUI() {
     const el = document.getElementById('transportMode');
@@ -4071,12 +4099,23 @@ function updateTransportUI() {
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN)) { el.textContent = '---'; return; }
     const ps = [...APP.state.peers.keys()];
     if (ps.length === 0) { el.textContent = '🟡 等待其他用戶'; return; }
-    el.innerHTML = '🟡 中繼 (WS Relay)'; el.style.color = '#f59e0b';
+    const modes = ps.map(pid => getPeerTransport(pid));
+    const allP2P = modes.every(m => m === 'p2p');
+    const anyP2P = modes.some(m => m === 'p2p');
+    const anyRelay = modes.some(m => m === 'relay');
+    if (allP2P) { el.innerHTML = '🟢 P2P (WebRTC)'; el.style.color = '#22c55e'; }
+    else if (anyP2P && anyRelay) { el.innerHTML = '🟡 混合 (P2P + Relay)'; el.style.color = '#f59e0b'; }
+    else if (anyRelay) { el.innerHTML = '🟡 中繼 (WS Relay)'; el.style.color = '#f59e0b'; }
+    else { el.innerHTML = '🟡 連線中...'; el.style.color = '#94a3b8'; }
+    // Per-peer detail
     const detail = document.getElementById('peerTransportDetail');
     if (detail) {
         detail.innerHTML = ps.map(pid => {
+            const m = getPeerTransport(pid);
             const name = APP.state.peerNames.get(pid) || pid;
-            return '<div>🟡 ' + escapeHtml(name) + '：<span style="color:#94a3b8">relay</span></div>';
+            const icon = m === 'p2p' ? '🟢' : m === 'relay' ? '🟡' : '⚪';
+            const label = m === 'p2p' ? 'P2P' : m === 'relay' ? 'Relay' : '連線中';
+            return '<div>' + icon + ' ' + escapeHtml(name) + '：<span style="color:#94a3b8">' + label + '</span></div>';
         }).join('');
     }
 }
@@ -4100,16 +4139,20 @@ function relayToPeers(jsonStr, peerIds) {
 }
 
 function broadcastToPeers(jsonStr) {
-    // Relay-only: always use WS relay
+    // Hybrid: try P2P DC first, fallback to WS relay
     for (const pid of APP.state.peers.keys()) {
-        relayToPeer(pid, jsonStr);
+        if (!sendToPeerDC(pid, jsonStr)) {
+            relayToPeer(pid, jsonStr);
+        }
     }
 }
 
 function sendToPeers(jsonStr, peerIds) {
-    // Relay-only: always use WS relay (no DC path)
+    // Hybrid: try P2P DC first, fallback to WS relay
     for (const pid of peerIds) {
-        relayToPeer(pid, jsonStr);
+        if (!sendToPeerDC(pid, jsonStr)) {
+            relayToPeer(pid, jsonStr);
+        }
     }
 }
 
@@ -4205,7 +4248,7 @@ async function sendFileToPeer(entry, pid) {
         sendToPeers(metaMsg, new Set([pid]));
 
         const peerState = APP.state.peers.get(pid);
-        const useRelay = true;  // Relay-only mode
+        const useRelay = !(peerState && peerState.dc && peerState.dc.readyState === 'open');
 
         for (let i = 0; i < totalChunks; i++) {
             const start = i * CHUNK_SIZE;
