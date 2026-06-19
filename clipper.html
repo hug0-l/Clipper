@@ -4235,21 +4235,24 @@ async function sendFileToPeer(entry, pid) {
                 checksum = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
             } catch (_) {}
         }
-        const metaObj = {type: 'file-meta', fileId: relayFileId, name: entry.name, size: entry.size, chunks: totalChunks};
+        const peerState = APP.state.peers.get(pid);
+        const useRelay = !(peerState && peerState.dc && peerState.dc.readyState === 'open');
+        // Use larger chunks for relay to reduce overhead (64KB vs 16KB for DC)
+        const effectiveChunkSize = useRelay ? 65536 : CHUNK_SIZE;
+        const effectiveTotalChunks = Math.ceil(buffer.byteLength / effectiveChunkSize);
+
+        const metaObj = {type: 'file-meta', fileId: relayFileId, name: entry.name, size: entry.size, chunks: effectiveTotalChunks};
         if (checksum) metaObj.sha256 = checksum;
         const metaMsg = JSON.stringify(metaObj);
         sendToPeers(metaMsg, new Set([pid]));
 
-        const peerState = APP.state.peers.get(pid);
-        const useRelay = !(peerState && peerState.dc && peerState.dc.readyState === 'open');
-
-        for (let i = 0; i < totalChunks; i++) {
-            const start = i * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, buffer.byteLength);
+        for (let i = 0; i < effectiveTotalChunks; i++) {
+            const start = i * effectiveChunkSize;
+            const end = Math.min(start + effectiveChunkSize, buffer.byteLength);
             const chunk = buffer.slice(start, end);
 
             if (useRelay) {
-                // Fallback: send chunk via WS relay as base64
+                // Send chunk via WS relay as base64 with small delay to avoid flooding
                 const chunkBase64 = await new Promise(resolve => {
                     const reader = new FileReader();
                     reader.onload = () => resolve(reader.result.split(',')[1]);
@@ -4257,8 +4260,10 @@ async function sendFileToPeer(entry, pid) {
                 });
                 sendWsMessage({
                     type: 'relay-chunk', room: APP.state.room, to: pid,
-                    fileId: relayFileId, chunk: chunkBase64, index: i, total: totalChunks
+                    fileId: relayFileId, chunk: chunkBase64, index: i, total: effectiveTotalChunks
                 });
+                // Small delay between chunks to avoid WS flood
+                await new Promise(r => setTimeout(r, 10));
             } else {
                 while (peerState.dc.bufferedAmount > 65536) {
                     await new Promise(resolve => {
@@ -4269,8 +4274,10 @@ async function sendFileToPeer(entry, pid) {
             }
             const sendingEntry = APP.state.fileSending.get(pid);
             if (sendingEntry) {
-                sendingEntry.progress = Math.round(((i + 1) / totalChunks) * 100);
+                sendingEntry.progress = Math.round(((i + 1) / effectiveTotalChunks) * 100);
             }
+            // Update UI every 8 chunks to avoid flooding DOM
+            if (i % 8 === 0) updateFileUI();
         }
         const doneMsg = JSON.stringify({type: 'file-done', fileId: relayFileId});
         sendToPeers(doneMsg, new Set([pid]));
