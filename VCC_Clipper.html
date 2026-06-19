@@ -406,6 +406,132 @@ footer input[type="text"] {
     to { transform: translateY(0); }
 }
 
+/* --- Notice Board Styles --- */
+.notice-container {
+    max-width: 700px;
+    margin: 0 auto;
+}
+.notice-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+.notice-header h2 {
+    font-size: 18px;
+    font-weight: 600;
+}
+.notice-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.notice-card {
+    background: #1e293b;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 0;
+}
+.notice-card.pinned {
+    border-left: 3px solid #fbbf24;
+}
+.notice-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.notice-card-title {
+    font-weight: 600;
+    flex: 1;
+    font-size: 15px;
+}
+.pin-badge {
+    font-size: 13px;
+    color: #fbbf24;
+}
+.notice-card-meta {
+    font-size: 12px;
+    color: #64748b;
+    margin-bottom: 8px;
+}
+.notice-card-content {
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #cbd5e1;
+    line-height: 1.6;
+    margin-bottom: 10px;
+}
+.notice-card-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 8px;
+    border-top: 1px solid #334155;
+}
+.btn-icon {
+    background: transparent;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+    font-family: inherit;
+}
+.btn-icon:hover {
+    color: #e2e8f0;
+    background: rgba(255,255,255,0.05);
+}
+.notice-post-form {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+.notice-form-box {
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 500px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.notice-form-box h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+.notice-form-input {
+    width: 100%;
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+}
+.notice-form-input:focus {
+    border-color: #38bdf8;
+}
+.notice-form-textarea {
+    min-height: 120px;
+    resize: vertical;
+}
+.notice-form-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+}
 /* --- Confirm Dialog --- */
 .modal-overlay {
     position: fixed;
@@ -471,9 +597,8 @@ footer input[type="text"] {
 <nav>
     <button class="tab-btn active" data-target="clipboard">💬 聊天室</button>
     <button class="tab-btn" data-target="filetransfer">📁 檔案傳輸</button>
+    <button class="tab-btn" data-target="noticeboard">📋 公告欄</button>
     <button class="tab-btn" data-target="checklist">✅ 檢查清單</button>
-
-
     <button class="tab-btn" data-target="about">ℹ️ 關於</button>
     <div class="tab-spacer"></div>
 </nav>
@@ -505,7 +630,15 @@ footer input[type="text"] {
             </div>
             <div class="file-overall" id="fileOverall">0 / 0 個檔案完成</div>
             <div class="file-queue" id="fileQueue"></div>
-            <button class="btn btn-secondary file-clear-btn" id="btnClearDone" style="display:none">清除已完成</button>
+            <button class="btn btn-secondary file-clear-btn" id="btnClearDone" style="display:none">清除已完成</button>        </div>
+    </section>
+    <section class="tab-pane" data-tab="noticeboard">
+        <div class="notice-container">
+            <div class="notice-header">
+                <h2>📋 公告欄</h2>
+                <button class="btn btn-primary" id="btnNewPost">✏️ 新增公告</button>
+            </div>
+            <div class="notice-list" id="noticeList"></div>
         </div>
     </section>
 
@@ -579,6 +712,7 @@ const APP = {
         selectedTargetPeerIds: new Set(),
         sendDoneCount: 0,
         intentionalDisconnect: false,
+        noticePosts: [],
         syncProviders: [],
         syncConsumers: [],
         persistedChatMessages: [],        checklistItems: [], // array of {id, text, checked, addedBy, timestamp, checkedAt}
@@ -711,6 +845,155 @@ APP.registerSyncConsumer = function(fn) {
     APP.state.syncConsumers.push(fn);
 };
 
+// ========== Notice Board ==========
+function mergeNoticePosts(incoming) {
+    const existing = APP.state.noticePosts;
+    for (const post of incoming) {
+        const idx = existing.findIndex(p => p.id === post.id);
+        if (idx >= 0) {
+            if (post.timestamp > existing[idx].timestamp) {
+                existing[idx] = post;
+            }
+        } else {
+            existing.push(post);
+        }
+    }
+    APP.state.noticePosts = existing;
+}
+
+function renderNoticeBoard() {
+    const list = document.getElementById('noticeList');
+    if (!list) return;
+    const sorted = [...APP.state.noticePosts].sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return b.timestamp - a.timestamp;
+    });
+    if (sorted.length === 0) {
+        list.innerHTML = '<div style="color:#64748b;text-align:center;padding:40px;font-size:14px">📋 尚無公告，點擊上方按鈕新增</div>';
+        return;
+    }
+    list.innerHTML = sorted.map(post => {
+        const timeStr = new Date(post.timestamp).toLocaleString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        const editedStr = post.editedAt ? ' (已編輯)' : '';
+        return '<div class="notice-card' + (post.pinned ? ' pinned' : '') + '">'
+            + '<div class="notice-card-header">'
+            + '<div class="notice-card-title">' + escapeHtml(post.title) + '</div>'
+            + (post.pinned ? '<span class="pin-badge">📌</span>' : '')
+            + '</div>'
+            + '<div class="notice-card-meta">' + escapeHtml(post.author) + ' · ' + timeStr + editedStr + '</div>'
+            + '<div class="notice-card-content">' + escapeHtml(post.content) + '</div>'
+            + '<div class="notice-card-actions">'
+            + '<button class="btn-icon" data-action="edit" data-id="' + post.id + '">✏️</button>'
+            + '<button class="btn-icon" data-action="pin" data-id="' + post.id + '">' + (post.pinned ? '📌 取消置頂' : '📌 置頂') + '</button>'
+            + '<button class="btn-icon" data-action="delete" data-id="' + post.id + '" style="color:#ef4444">🗑</button>'
+            + '</div></div>';
+    }).join('');
+
+    list.querySelectorAll('[data-action="edit"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const post = APP.state.noticePosts.find(p => p.id === btn.dataset.id);
+            if (post) showNoticeForm(post);
+        });
+    });
+    list.querySelectorAll('[data-action="pin"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            togglePinNoticePost(btn.dataset.id);
+        });
+    });
+    list.querySelectorAll('[data-action="delete"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            deleteNoticePost(btn.dataset.id);
+        });
+    });
+}
+
+function showNoticeForm(post) {
+    const existingOverlay = document.querySelector('.notice-post-form');
+    if (existingOverlay) existingOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'notice-post-form';
+    const isEdit = !!post;
+    overlay.innerHTML = '<div class="notice-form-box">'
+        + '<h3>' + (isEdit ? '✏️ 編輯公告' : '✏️ 新增公告') + '</h3>'
+        + '<input type="text" class="notice-form-input" id="noticeFormTitle" placeholder="公告標題" value="' + (isEdit ? escapeHtml(post.title) : '') + '">'
+        + '<textarea class="notice-form-input notice-form-textarea" id="noticeFormContent" placeholder="公告內容...">' + (isEdit ? escapeHtml(post.content) : '') + '</textarea>'
+        + '<div class="notice-form-buttons">'
+        + '<button class="btn btn-secondary" id="noticeFormCancel">取消</button>'
+        + '<button class="btn btn-primary" id="noticeFormSave">' + (isEdit ? '儲存' : '發布') + '</button>'
+        + '</div></div>';
+    document.body.appendChild(overlay);
+
+    const titleInput = document.getElementById('noticeFormTitle');
+    const contentInput = document.getElementById('noticeFormContent');
+
+    document.getElementById('noticeFormCancel').addEventListener('click', () => overlay.remove());
+    document.getElementById('noticeFormSave').addEventListener('click', () => {
+        const title = titleInput.value.trim();
+        const content = contentInput.value.trim();
+        if (!title || !content) {
+            APP.showStatusMsg('❌ 標題和內容不能為空');
+            return;
+        }
+        if (isEdit) {
+            editNoticePost(post.id, title, content);
+        } else {
+            createNoticePost(title, content);
+        }
+        overlay.remove();
+    });
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+    titleInput.focus();
+}
+
+function createNoticePost(title, content) {
+    const post = {
+        id: crypto.randomUUID(),
+        title,
+        content,
+        author: APP.state.displayName,
+        pinned: false,
+        timestamp: Date.now(),
+    };
+    APP.state.noticePosts.push(post);
+    saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+    broadcastToPeers(JSON.stringify({type: 'notice-publish', post}));
+    renderNoticeBoard();
+    APP.showStatusMsg('✅ 公告已發布');
+}
+
+function editNoticePost(id, title, content) {
+    const post = APP.state.noticePosts.find(p => p.id === id);
+    if (!post) return;
+    post.title = title;
+    post.content = content;
+    post.editedAt = Date.now();
+    saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+    broadcastToPeers(JSON.stringify({type: 'notice-edit', id, title, content, editedAt: post.editedAt}));
+    renderNoticeBoard();
+    APP.showStatusMsg('✅ 公告已更新');
+}
+
+async function deleteNoticePost(id) {
+    const confirmed = await showConfirmDialog('確定要刪除此公告嗎？');
+    if (!confirmed) return;
+    APP.state.noticePosts = APP.state.noticePosts.filter(p => p.id !== id);
+    saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+    broadcastToPeers(JSON.stringify({type: 'notice-delete', id}));
+    renderNoticeBoard();
+    APP.showStatusMsg('✅ 公告已刪除');
+}
+
+function togglePinNoticePost(id) {
+    const post = APP.state.noticePosts.find(p => p.id === id);
+    if (!post) return;
+    post.pinned = !post.pinned;
+    saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+    broadcastToPeers(JSON.stringify({type: 'notice-pin', id, pinned: post.pinned}));
+    renderNoticeBoard();
+}
 // ========== Display Name ==========
 const ADJS = ['快樂','活潑','聰明','安靜','勇敢','溫柔','可愛','陽光','調皮','大方','瀟灑','優雅','熱情','冷靜','開朗'];
 const NOUNS = ['熊貓','海豚','老鷹','貓咪','狐狸','兔子','狼','老虎','獅子','企鵝','天鵝','蝴蝶','鸚鵡','鯨魚','樹懶'];
@@ -1102,6 +1385,38 @@ function setupDataChannel(dc, peerId) {
                             fn(msg);
                         }
                         break;
+                    case 'notice-publish': {
+                        mergeNoticePosts([msg.post]);
+                        saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+                        renderNoticeBoard();
+                        break;
+                    }
+                    case 'notice-edit': {
+                        const editPost = APP.state.noticePosts.find(p => p.id === msg.id);
+                        if (editPost) {
+                            editPost.title = msg.title;
+                            editPost.content = msg.content;
+                            editPost.editedAt = msg.editedAt;
+                            saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+                            renderNoticeBoard();
+                        }
+                        break;
+                    }
+                    case 'notice-delete': {
+                        APP.state.noticePosts = APP.state.noticePosts.filter(p => p.id !== msg.id);
+                        saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+                        renderNoticeBoard();
+                        break;
+                    }
+                    case 'notice-pin': {
+                        const pinPost = APP.state.noticePosts.find(p => p.id === msg.id);
+                        if (pinPost) {
+                            pinPost.pinned = msg.pinned;
+                            saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+                            renderNoticeBoard();
+                        }
+                        break;
+                    }
                     case 'checklist-add':
                         mergeIncomingChecklistItem(msg.item);
                         saveToStorage('vcc_checklist_items', APP.state.checklistItems);
@@ -1827,6 +2142,24 @@ document.getElementById('btnClearChat').addEventListener('click', async () => {
     document.getElementById('chatMessages').innerHTML = '';
     APP.showStatusMsg('本機聊天紀錄已清除');
 });
+
+// ========== Notice Board Init ==========
+APP.state.noticePosts = loadFromStorage('vcc_notice_posts', []);
+renderNoticeBoard();
+
+APP.registerSyncProvider(() => ({noticePosts: APP.state.noticePosts}));
+APP.registerSyncConsumer((data) => {
+    if (data.noticePosts) {
+        mergeNoticePosts(data.noticePosts);
+        saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+        renderNoticeBoard();
+    }
+});
+
+document.getElementById('btnNewPost').addEventListener('click', () => {
+    showNoticeForm();
+});
+
 </script>
 </body>
 </html>
