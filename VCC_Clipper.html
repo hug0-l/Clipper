@@ -395,10 +395,8 @@ footer input[type="text"] {
     background: rgba(56, 189, 248, 0.1);
     color: #38bdf8;
 }
-.file-target-select .peer-target-btn.deselected {
-    border-color: #334155;
-    background: transparent;
-    color: #475569;
+.file-no-target {
+    font-size:13px; color:#ef4444; padding:6px 0; text-align:center;
 }
 /* --- Chat Room Styles --- */
 .chat-container { display:flex; flex-direction:column; max-width:700px; margin:0 auto; min-height:0; flex:1; width:100%; }
@@ -2396,14 +2394,7 @@ function sendToPeers(jsonStr, peerIds) {
 }
 
 function getEffectiveTargets() {
-    if (APP.state.selectedTargetPeerIds.size > 0) {
-        return new Set(APP.state.selectedTargetPeerIds);
-    }
-    const all = new Set();
-    for (const [pid, ps] of APP.state.peers) {
-        if (ps.dc && ps.dc.readyState === 'open') all.add(pid);
-    }
-    return all;
+    return new Set(APP.state.selectedTargetPeerIds);
 }
 
 function updatePeerTargetUI() {
@@ -2416,12 +2407,24 @@ function updatePeerTargetUI() {
     }
     container.style.display = '';
     list.innerHTML = '';
+    // No-target warning
+    if (APP.state.selectedTargetPeerIds.size === 0) {
+        const warn = document.createElement('div');
+        warn.className = 'file-no-target';
+        warn.textContent = '⚠ 請點選傳送對象';
+        list.appendChild(warn);
+    }
     // "All" button
     const allBtn = document.createElement('button');
-    allBtn.className = 'peer-target-btn' + (APP.state.selectedTargetPeerIds.size === 0 ? ' selected' : '');
+    const allSelected = APP.state.selectedTargetPeerIds.size > 0 && APP.state.peers.size > 0 &&
+        [...APP.state.peers].every(([pid, ps]) => !ps.dc || ps.dc.readyState !== 'open' || APP.state.selectedTargetPeerIds.has(pid));
+    allBtn.className = 'peer-target-btn' + (allSelected ? ' selected' : '');
     allBtn.textContent = '👥 全部';
     allBtn.addEventListener('click', () => {
         APP.state.selectedTargetPeerIds.clear();
+        for (const [pid, ps] of APP.state.peers) {
+            if (ps.dc && ps.dc.readyState === 'open') APP.state.selectedTargetPeerIds.add(pid);
+        }
         updatePeerTargetUI();
     });
     list.appendChild(allBtn);
@@ -2429,8 +2432,8 @@ function updatePeerTargetUI() {
     for (const [pid, ps] of APP.state.peers) {
         if (!ps.dc || ps.dc.readyState !== 'open') continue;
         const btn = document.createElement('button');
-        const selected = APP.state.selectedTargetPeerIds.has(pid) || APP.state.selectedTargetPeerIds.size === 0;
-        btn.className = 'peer-target-btn' + (selected ? ' selected' : ' deselected');
+        const selected = APP.state.selectedTargetPeerIds.has(pid);
+        btn.className = 'peer-target-btn' + (selected ? ' selected' : '');
         const dName = APP.state.peerNames.get(pid) || pid;
         btn.textContent = `🖥 ${dName}`;
         btn.title = pid;
