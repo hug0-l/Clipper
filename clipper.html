@@ -2040,6 +2040,22 @@ function handleWsMessage(data) {
             }
             break;
 
+        case 'file-cancel':
+            // Sender received cancel from receiver — stop sending this file
+            if (data.fileId) {
+                for (const [pid, entry] of APP.state.fileSending) {
+                    if (entry.fileId === data.fileId) {
+                        entry.status = 'cancelled';
+                        APP.state.fileSending.delete(pid);
+                        break;
+                    }
+                }
+                APP.state.fileQueue = APP.state.fileQueue.filter(f => f.fileId !== data.fileId);
+                updateFileUI();
+                APP.showStatusMsg('❌ 傳送已取消：' + (data.fileId || ''));
+            }
+            break;
+
         case 'dump-result':
             console.log('=== Server Dump ===', JSON.stringify(data, null, 2));
             APP.showStatusMsg('🔍 伺服器資料已輸出到開發者主控台');
@@ -3270,10 +3286,15 @@ function updateFileUI() {
 
     const items = [];
     for (const entry of APP.state.fileSending.values()) {
-        items.push(entry);
+        items.push({...entry, direction: 'up'});
     }
     for (const f of APP.state.fileQueue) {
-        if (!items.find(i => i.fileId === f.fileId)) items.push(f);
+        if (!items.find(i => i.fileId === f.fileId)) items.push({...f, direction: 'up'});
+    }
+    for (const entry of APP.state.fileReceives.values()) {
+        if (!items.find(i => i.fileId === entry.fileId)) {
+            items.push({...entry, direction: 'down'});
+        }
     }
 
     const doneCount = [...APP.state.fileSending.values()].filter(e => e.status === 'done').length;
@@ -3290,21 +3311,55 @@ function updateFileUI() {
 
     queue.innerHTML = items.map(f => {
         const pct = f.progress || 0;
-        const statusMap = {pending: '等待中', sending: `傳送中 ${pct}%`, done: '已完成', error: '失敗'};
+        const isReceiving = f.direction === 'down';
+        const label = isReceiving ? '接收中' : '傳送中';
+        const statusMap = {pending: '等待中', sending: `${label} ${pct}%`, receiving: `接收中 ${pct}%`, done: '已完成', error: '失敗', cancelled: '已取消'};
         const statusText = statusMap[f.status] || f.status;
-        const fillClass = f.status === 'done' ? 'done' : f.status === 'error' ? 'error' : '';
+        const fillClass = f.status === 'done' ? 'done' : (f.status === 'error' ? 'error' : (f.status === 'cancelled' ? 'error' : ''));
+        const prefix = isReceiving ? '📥 ' : '📤 ';
         const safeName = f.name.replace(/"/g, '&quot;');
+        const canCancel = f.status === 'pending' || f.status === 'sending' || f.status === 'receiving';
+        const cancelBtn = canCancel ? `<button class="file-cancel-btn" data-file-id="${f.fileId}" data-direction="${f.direction}" title="取消" style="font-size:11px;padding:1px 6px;border:1px solid #ef4444;background:transparent;color:#ef4444;border-radius:4px;cursor:pointer;">✕ 取消</button>` : '';
         const retryBtn = f.status === 'error' ? `<button class="file-retry-btn" data-file-id="${f.fileId}">重試</button>` : '';
         return `<div class="file-item">
             <div class="file-item-header">
-                <span class="file-name" title="${safeName}">${safeName}</span>
+                <span class="file-name" title="${safeName}">${prefix}${safeName}</span>
                 <span class="file-size">${formatFileSize(f.size)}</span>
             </div>
             <div class="file-progress-bar"><div class="file-progress-fill ${fillClass}" style="width:${pct}%"></div></div>
-            <div class="file-status"><span class="${f.status}">${statusText}</span>${retryBtn}</div>
+            <div class="file-status"><span class="${f.status}">${statusText}</span>${cancelBtn}${retryBtn}</div>
         </div>`;
     }).join('');
 
+    // Cancel buttons
+    queue.querySelectorAll('.file-cancel-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const fileId = btn.dataset.fileId;
+            const dir = btn.dataset.direction;
+            if (dir === 'up') {
+                // Cancel outgoing: remove from queue + stop sending
+                APP.state.fileQueue = APP.state.fileQueue.filter(f => f.fileId !== fileId);
+                for (const [pid, entry] of APP.state.fileSending) {
+                    if (entry.fileId === fileId) {
+                        APP.state.fileSending.delete(pid);
+                        break;
+                    }
+                }
+                updateFileUI();
+            } else {
+                // Cancel incoming: mark cancelled, notify sender
+                const entry = APP.state.fileReceives.get(fileId);
+                if (entry) {
+                    entry.status = 'cancelled';
+                    if (APP.state.connected && APP.state.room) {
+                        sendWsMessage({type: 'file-cancel', room: APP.state.room, to: entry.fromPeer || '', fileId});
+                    }
+                }
+                updateFileUI();
+            }
+        });
+    });
+    // Retry buttons
     queue.querySelectorAll('.file-retry-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const fileId = btn.dataset.fileId;
@@ -3347,6 +3402,9 @@ function markAllFailed() {
         entry.status = 'error';
     }
     APP.state.fileSending.clear();
+    for (const entry of APP.state.fileReceives.values()) {
+        if (entry.status === 'receiving') entry.status = 'error';
+    }
     for (const f of APP.state.fileQueue) {
         if (f.status === 'pending' || f.status === 'sending') {
             f.status = 'error';
@@ -3568,10 +3626,16 @@ async function sendNextFile() {
 function handleFileMeta(msg, fromPeerId) {
     console.log('[FT] File meta:', msg.name, msg.size, msg.chunks, 'chunks', 'from', fromPeerId);
     APP.state.fileReceives.set(msg.fileId, {
+        fileId: msg.fileId,
         name: msg.name, size: msg.size, received: 0, blobs: [], status: 'receiving',
-        sha256: msg.sha256 || null
+        sha256: msg.sha256 || null, progress: 0,
+        fromPeer: fromPeerId, chunks: msg.chunks || 0, chunkCount: 0
     });
     APP.state.peerCurrentFile.set(fromPeerId, msg.fileId);
+    // Show popup notification + update UI
+    const displayName = APP.state.peerNames.get(fromPeerId) || fromPeerId;
+    showPopup('📁', '接收檔案中', displayName + ' 正在傳送：' + msg.name);
+    updateFileUI();
 }
 
 function handleFileChunk(data, fromPeerId) {
@@ -3581,12 +3645,20 @@ function handleFileChunk(data, fromPeerId) {
     if (!entry || entry.status !== 'receiving') return;
     entry.blobs.push(data);
     entry.received += data.byteLength;
+    entry.chunkCount = (entry.chunkCount || 0) + 1;
+    // Update progress every ~64 chunks (~1MB) to avoid flooding UI
+    if (entry.chunkCount % 64 === 0) {
+        entry.progress = entry.chunks > 0 ? Math.round((entry.chunkCount / entry.chunks) * 100) : Math.round((entry.received / entry.size) * 100);
+        updateFileUI();
+    }
 }
 
 function handleFileDone(msg, fromPeerId) {
     const entry = APP.state.fileReceives.get(msg.fileId);
-    if (!entry) return;
+    if (!entry || entry.status === 'cancelled') return;
     entry.status = 'done';
+    entry.progress = 100;
+    updateFileUI();
 
     const blob = new Blob(entry.blobs, {type: 'application/octet-stream'});
     const url = URL.createObjectURL(blob);

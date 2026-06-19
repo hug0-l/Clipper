@@ -634,6 +634,20 @@ async def handler(websocket):
                 except websockets.exceptions.ConnectionClosed:
                     pass
 
+            elif msg_type == "file-cancel":
+                rid = data.get("room")
+                target = data.get("to") or data.get("sender")
+                if rid and target and target in rooms.get(rid, {}):
+                    try:
+                        await rooms[rid][target]["ws"].send(json.dumps({
+                            "type": "file-cancel",
+                            "from": my_peer_id,
+                            "fileId": data.get("fileId"),
+                        }))
+                        _debug(f"→ TX file-cancel to={target} from={my_peer_id} fileId={data.get('fileId')}")
+                    except websockets.exceptions.ConnectionClosed:
+                        pass
+
             elif msg_type == "dump":
                 iso_ts = datetime.now(timezone.utc).isoformat()
                 rooms_diag = {}
