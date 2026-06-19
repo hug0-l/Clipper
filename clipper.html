@@ -1465,7 +1465,7 @@ const APP = {
     updateSyncStatus() {
         const el = document.getElementById('syncStatus');
         const btn = document.getElementById('btnSync');
-        if (!APP.state.connected) {
+        if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN)) {
             el.className = 'sync-status offline';
             el.textContent = '🔴 未同步';
             btn.style.display = 'none';
@@ -1897,7 +1897,7 @@ function showNoticeForm(post) {
 }
 
 function createNoticePost(title, content, category, tagsString) {
-    if (!APP.state.connected || !APP.state.room) {
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
@@ -1923,7 +1923,7 @@ function createNoticePost(title, content, category, tagsString) {
 }
 
 function editNoticePost(id, title, content, category, tagsString) {
-    if (!APP.state.connected || !APP.state.room) {
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
@@ -2127,7 +2127,7 @@ function showKeyProgramForm(entryId) {
 }
 
 function createKeyEntry(label, streamKey, streamUrl, currentProgram) {
-    if (!APP.state.connected || !APP.state.room) {
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
@@ -2150,7 +2150,7 @@ function createKeyEntry(label, streamKey, streamUrl, currentProgram) {
 }
 
 function editKeyEntry(id, updates) {
-    if (!APP.state.connected || !APP.state.room) {
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
@@ -2187,7 +2187,7 @@ function toggleKeyActive(id) {
 }
 
 function setKeyProgram(id, currentProgram) {
-    if (!APP.state.connected || !APP.state.room) {
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
@@ -2575,7 +2575,7 @@ function handleWsMessage(data) {
             if (data.data && data.data.type === 'chat') {
                 appendChatMessage(data.data.from, data.data.text, data.data.timestamp);
                 // Also ack via relay if we got the msgId
-                if (data.data.msgId && APP.state.connected && APP.state.room) {
+                if (data.data.msgId && (APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) && APP.state.room) {
                     sendWsMessage({type: 'relay-data', room: APP.state.room, to: data.from, data: {type: 'ack', msgId: data.data.msgId}});
                 }
             } else if (data.data && data.data.type === 'file-meta') {
@@ -2976,7 +2976,7 @@ function setupDataChannel(dc, peerId) {
             console.error('[DC] send sync-request error', e);
         }
         APP.updatePeerCount();
-        if (!APP.state.connected) {
+        if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN)) {
             APP.updateStatus('connected');
             APP.showPairingUI(false);
         }
@@ -3102,7 +3102,7 @@ function cleanupConnection() {
 // ========== UI Handlers ==========
 
 function createRoom() {
-    if (APP.state.connected || APP.state.peers.size > 0) {
+    if ((APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) || APP.state.peers.size > 0) {
         APP.showStatusMsg('請先中斷目前連線');
         return;
     }
@@ -3122,7 +3122,7 @@ function createRoom() {
 }
 
 function joinRoom() {
-    if (APP.state.connected || APP.state.peers.size > 0) {
+    if ((APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) || APP.state.peers.size > 0) {
         APP.showStatusMsg('請先中斷目前連線');
         return;
     }
@@ -3178,7 +3178,7 @@ document.getElementById('serverUrl').addEventListener('change', function() {
 
 // --- Sync button ---
 function requestSync() {
-    if (!APP.state.connected || !APP.state.room) {
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
@@ -3210,7 +3210,7 @@ document.getElementById('displayNameSpan').addEventListener('click', function() 
             span.textContent = APP.state.displayName;
             span.style.display = '';
             // Notify server so peer-list reflects the change
-            if (APP.state.connected && APP.state.room) {
+            if ((APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) && APP.state.room) {
                 sendWsMessage({type: 'register-name', room: APP.state.room, displayName: APP.state.displayName});
             }
         } else {
@@ -3246,7 +3246,7 @@ setInterval(updateClock, 1000);
 
 // Periodic time sync from server — every 5 seconds
 setInterval(() => {
-    if (APP.state.connected && APP.state.room) {
+    if ((APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) && APP.state.room) {
         sendWsMessage({type: 'time-request'});
     }
 }, 5000);
@@ -3516,7 +3516,7 @@ function showChecklistForm(board) {
                 APP.showStatusMsg('✅ 檢查清單已更新');
             }
         } else {
-            if (!APP.state.connected || !APP.state.room) {
+            if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
                 APP.showStatusMsg('❌ 請先建立連線');
                 return;
             }
@@ -3546,7 +3546,7 @@ function showChecklistForm(board) {
 }
 
 function addChecklistItem(checklistId, text) {
-    if (!APP.state.connected || !APP.state.room) {
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
@@ -3690,7 +3690,7 @@ setInterval(() => {
             board.reminderTitle = '';
             saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
             // Also tell server to clear it
-            if (APP.state.connected && APP.state.room) {
+            if ((APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) && APP.state.room) {
                 sendWsMessage({type: 'checklistboard-remind', room: APP.state.room, id: board.id, reminderAt: null, reminderTitle: ''});
             }
             renderChecklistBoards();
@@ -3787,7 +3787,7 @@ function renderTemplates() {
 function useTemplate(tplId) {
     const tpl = APP.state.checklistTemplates.find(t => t.id === tplId);
     if (!tpl) { APP.showStatusMsg('❌ 找不到該範本'); return; }
-    if (!APP.state.connected || !APP.state.room) {
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
@@ -4005,7 +4005,7 @@ function updateFileUI() {
                 const entry = APP.state.fileReceives.get(fileId);
                 if (entry) {
                     entry.status = 'cancelled';
-                    if (APP.state.connected && APP.state.room) {
+                    if ((APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) && APP.state.room) {
                         sendWsMessage({type: 'file-cancel', room: APP.state.room, to: entry.fromPeer || '', fileId});
                     }
                 }
@@ -4027,7 +4027,7 @@ function updateFileUI() {
 }
 
 function handleFiles(fileList) {
-    if (!APP.state.connected) {
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN)) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
@@ -4077,7 +4077,7 @@ function getPeerTransport(pid) {
 function updateTransportUI() {
     const el = document.getElementById('transportMode');
     if (!el) return;
-    if (!APP.state.connected) { el.textContent = '---'; return; }
+    if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN)) { el.textContent = '---'; return; }
     const ps = [...APP.state.peers.keys()];
     if (ps.length === 0) { el.textContent = '🟡 等待其他用戶'; return; }
     const modes = ps.map(pid => getPeerTransport(pid));
@@ -4580,7 +4580,7 @@ function updateSettingsView() {
             else if (ago < 3600) syncEl.textContent = Math.floor(ago / 60) + ' 分鐘前';
             else syncEl.textContent = Math.floor(ago / 3600) + ' 小時前';
         } else {
-            syncEl.textContent = APP.state.connected ? '未同步' : '---';
+            syncEl.textContent = (APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) ? '未同步' : '---';
         }
     }
     if (roomEl) roomEl.textContent = APP.state.room || '---';
