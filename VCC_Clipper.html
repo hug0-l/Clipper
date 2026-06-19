@@ -14,7 +14,7 @@ body {
     background: #090d16;
     color: #e2e8f0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    font-size: 14px;
+    font-size:18px;
     line-height: 1.5;
     height: 100vh;
     display: flex;
@@ -29,7 +29,7 @@ header {
     border-bottom: 1px solid #1e293b;
 }
 header h1 {
-    font-size: 18px;
+    font-size:22px;
     font-weight: 600;
     white-space: nowrap;
 }
@@ -39,7 +39,7 @@ header h1 {
     gap: 6px;
     padding: 4px 12px;
     border-radius: 12px;
-    font-size: 13px;
+    font-size:16px;
     background: #1e293b;
 }
 .status-badge.connected {
@@ -56,7 +56,7 @@ header h1 {
 }
 .room-code {
     margin-left: auto;
-    font-size: 13px;
+    font-size:16px;
     color: #94a3b8;
 }
 .clock-display {
@@ -67,13 +67,13 @@ header h1 {
 }
 .clock-time {
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-    font-size: 20px;
+    font-size:25px;
     font-weight: 600;
     color: #38bdf8;
     letter-spacing: 1px;
 }
 .clock-date {
-    font-size: 11px;
+    font-size:14px;
     color: #64748b;
 }
 .room-code span {
@@ -83,7 +83,7 @@ header h1 {
 }
 .peer-count {
     margin-left: 4px;
-    font-size: 12px;
+    font-size:15px;
     color: #64748b;
 }
 nav {
@@ -99,7 +99,7 @@ nav {
     border: none;
     background: transparent;
     color: #94a3b8;
-    font-size: 14px;
+    font-size:18px;
     font-family: inherit;
     border-bottom: 2px solid transparent;
     transition: color 0.15s, border-color 0.15s, background 0.15s;
@@ -146,11 +146,11 @@ main {
     justify-content: center;
     height: 200px;
     color: #64748b;
-    font-size: 24px;
+    font-size:30px;
     gap: 12px;
 }
 .pane-placeholder p {
-    font-size: 14px;
+    font-size:18px;
 }
 footer {
     background: #111827;
@@ -165,26 +165,26 @@ footer {
 /* Adaptive: keep all text visible, wrap & compact instead of hiding */
 @media (max-width: 800px) {
     header { flex-wrap: wrap; padding: 6px 10px; gap: 4px 10px; }
-    header h1 { font-size: 15px; white-space: nowrap; }
-    .status-badge { font-size: 12px; padding: 2px 8px; }
-    .clock-time { font-size: 15px; }
-    .clock-date { font-size: 10px; display: inline; margin-left: 4px; }
-    .peer-count { font-size: 12px; }
-    .display-name-label { font-size: 11px !important; }
-    .display-name-span { font-size: 12px; padding: 2px 6px; }
-    .room-code { font-size: 11px; }
+    header h1 { font-size:19px; white-space: nowrap; }
+    .status-badge { font-size:15px; padding: 2px 8px; }
+    .clock-time { font-size:19px; }
+    .clock-date { font-size:12px; display: inline; margin-left: 4px; }
+    .peer-count { font-size:15px; }
+    .display-name-label { font-size:14px !important; }
+    .display-name-span { font-size:15px; padding: 2px 6px; }
+    .room-code { font-size:14px; }
     nav { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    .tab-btn { font-size: 13px; padding: 8px 10px; flex-shrink: 0; }
+    .tab-btn { font-size:16px; padding: 8px 10px; flex-shrink: 0; }
     .chat-msg { max-width: 90%; }
 }
 @media (max-width: 500px) {
-    header h1 { font-size: 13px; }
-    .status-badge { font-size: 11px; padding: 2px 6px; }
-    .clock-time { font-size: 13px; }
-    .clock-date { font-size: 9px; }
-    .display-name-label { font-size: 10px !important; }
-    .display-name-span { font-size: 11px; }
-    .tab-btn { font-size: 11px; padding: 6px 6px; }
+    header h1 { font-size:16px; }
+    .status-badge { font-size:14px; padding: 2px 6px; }
+    .clock-time { font-size:16px; }
+    .clock-date { font-size:11px; }
+    .display-name-label { font-size:12px !important; }
+    .display-name-span { font-size:14px; }
+    .tab-btn { font-size:14px; padding: 6px 6px; }
     .server-url { width: 100px !important; }
     footer input[type="text"] { width: 60px; }
     .pairing-code input { width: 60px; }
@@ -192,7 +192,7 @@ footer {
 }
 footer label {
     color: #94a3b8;
-    font-size: 13px;
+    font-size:16px;
     white-space: nowrap;
 }
 footer input[type="text"],
@@ -202,7 +202,7 @@ footer input[type="url"] {
     color: #e2e8f0;
     padding: 6px 10px;
     border-radius: 6px;
-    font-size: 13px;
+    font-size:16px;
     font-family: inherit;
     outline: none;
     transition: border-color 0.15s;
@@ -223,7 +223,7 @@ footer input[type="text"] {
     border: none;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 13px;
+    font-size:16px;
     font-family: inherit;
     font-weight: 500;
     transition: background 0.15s, opacity 0.15s;
@@ -257,7 +257,7 @@ footer input[type="text"] {
     cursor: not-allowed;
 }
 .status-msg {
-    font-size: 12px;
+    font-size:15px;
     color: #94a3b8;
     margin-left: 8px;
     flex: 1;
@@ -288,11 +288,11 @@ footer input[type="text"] {
     background: rgba(56, 189, 248, 0.05);
 }
 .drop-zone-icon {
-    font-size: 36px;
+    font-size:45px;
     margin-bottom: 8px;
 }
 .file-overall {
-    font-size: 13px;
+    font-size:16px;
     color: #94a3b8;
     margin: 12px 0 8px;
 }
@@ -316,7 +316,7 @@ footer input[type="text"] {
 }
 .file-name {
     font-weight: 500;
-    font-size: 13px;
+    font-size:16px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -324,7 +324,7 @@ footer input[type="text"] {
 }
 .file-size {
     color: #64748b;
-    font-size: 12px;
+    font-size:15px;
     white-space: nowrap;
 }
 .file-progress-bar {
@@ -347,7 +347,7 @@ footer input[type="text"] {
     background: #ef4444;
 }
 .file-status {
-    font-size: 11px;
+    font-size:14px;
     color: #64748b;
     display: flex;
     justify-content: space-between;
@@ -357,7 +357,7 @@ footer input[type="text"] {
 .file-status .done { color: #22c55e; }
 .file-status .error { color: #ef4444; }
 .file-retry-btn {
-    font-size: 11px;
+    font-size:14px;
     padding: 2px 8px;
     border: 1px solid #ef4444;
     background: transparent;
@@ -382,7 +382,7 @@ footer input[type="text"] {
     border: 1px solid #334155;
     background: transparent;
     color: #94a3b8;
-    font-size: 12px;
+    font-size:15px;
     cursor: pointer;
     transition: all 0.15s;
     font-family: inherit;
@@ -406,13 +406,13 @@ footer input[type="text"] {
 .chat-msg { padding:8px 12px; border-radius:8px; max-width:80%; word-break:break-word; line-height:1.5; }
 .chat-msg.self { align-self:flex-end; background:#1d4ed8; color:#fff; }
 .chat-msg.other { align-self:flex-start; background:#1e293b; color:#e2e8f0; }
-.chat-msg .msg-sender { font-size:11px; opacity:0.7; margin-bottom:2px; }
-.chat-msg .msg-time { font-size:10px; opacity:0.5; text-align:right; margin-top:2px; }
+.chat-msg .msg-sender { font-size:14px; opacity:0.7; margin-bottom:2px; }
+.chat-msg .msg-time { font-size:12px; opacity:0.5; text-align:right; margin-top:2px; }
 .chat-input-bar { display:flex; gap:8px; }
-.chat-input-bar input { flex:1; background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:10px 14px; border-radius:8px; font-size:14px; outline:none; }
+.chat-input-bar input { flex:1; background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:10px 14px; border-radius:8px; font-size:18px; outline:none; }
 .chat-input-bar input:focus { border-color:#38bdf8; }
 .chat-clear-bar { display: flex; justify-content: flex-end; padding: 4px 0; gap: 8px; }
-.display-name-span { cursor:pointer; padding:4px 8px; border-radius:6px; font-size:13px; color:#e2e8f0; background:#1e293b; border:1px solid transparent; transition:border-color 0.15s; white-space:nowrap; }
+.display-name-span { cursor:pointer; padding:4px 8px; border-radius:6px; font-size:16px; color:#e2e8f0; background:#1e293b; border:1px solid transparent; transition:border-color 0.15s; white-space:nowrap; }
 .display-name-span:hover { border-color:#334155; }
 .display-name-span.editing { border-color:#38bdf8; background:#0f172a; }
 
@@ -426,7 +426,7 @@ footer input[type="text"] {
     z-index: 9999;
     padding: 10px 20px;
     text-align: center;
-    font-size: 14px;
+    font-size:18px;
     font-weight: 500;
     background: #7f1d1d;
     color: #fca5a5;
@@ -447,7 +447,7 @@ footer input[type="text"] {
     background: transparent;
     color: #fca5a5;
     cursor: pointer;
-    font-size: 13px;
+    font-size:16px;
     font-family: inherit;
 }
 #errorToast .toast-btn:hover {
@@ -470,7 +470,7 @@ footer input[type="text"] {
     margin-bottom: 20px;
 }
 .notice-header h2 {
-    font-size: 18px;
+    font-size:22px;
     font-weight: 600;
 }
 .notice-list {
@@ -491,7 +491,7 @@ footer input[type="text"] {
 }
 .notice-card .category-badge {
     display: inline-block;
-    font-size: 11px;
+    font-size:14px;
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 10px;
@@ -501,7 +501,7 @@ footer input[type="text"] {
 }
 .notice-card .tag-badge {
     display: inline-block;
-    font-size: 11px;
+    font-size:14px;
     padding: 1px 6px;
     border-radius: 4px;
     background: #334155;
@@ -521,14 +521,14 @@ footer input[type="text"] {
 .notice-card-title {
     font-weight: 600;
     flex: 1;
-    font-size: 15px;
+    font-size:19px;
 }
 .pin-badge {
-    font-size: 13px;
+    font-size:16px;
     color: #fbbf24;
 }
 .notice-card-meta {
-    font-size: 12px;
+    font-size:15px;
     color: #64748b;
     margin-bottom: 8px;
 }
@@ -551,7 +551,7 @@ footer input[type="text"] {
     border: none;
     color: #64748b;
     cursor: pointer;
-    font-size: 14px;
+    font-size:18px;
     padding: 4px 8px;
     border-radius: 4px;
     transition: color 0.15s, background 0.15s;
@@ -582,7 +582,7 @@ footer input[type="text"] {
     box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 }
 .notice-form-box h3 {
-    font-size: 16px;
+    font-size:20px;
     font-weight: 600;
     margin-bottom: 16px;
 }
@@ -593,7 +593,7 @@ footer input[type="text"] {
     color: #e2e8f0;
     padding: 10px 14px;
     border-radius: 8px;
-    font-size: 14px;
+    font-size:18px;
     font-family: inherit;
     outline: none;
     margin-bottom: 12px;
@@ -632,7 +632,7 @@ footer input[type="text"] {
 }
 .modal-dialog p {
     margin-bottom: 20px;
-    font-size: 15px;
+    font-size:19px;
     color: #e2e8f0;
     text-align: center;
     line-height: 1.6;
@@ -649,7 +649,7 @@ footer input[type="text"] {
 /* --- Checklist Styles --- */
 .checklist-container { max-width:600px; margin:0 auto; }
 .checklist-add-bar { display:flex; gap:8px; margin-bottom:16px; }
-.checklist-add-bar input { flex:1; background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:10px 14px; border-radius:8px; font-size:14px; outline:none; }
+.checklist-add-bar input { flex:1; background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:10px 14px; border-radius:8px; font-size:18px; outline:none; }
 .checklist-add-bar input:focus { border-color:#38bdf8; }
 .checklist-items { display:flex; flex-direction:column; gap:4px; }
 .checklist-item { display:flex; align-items:center; padding:8px 12px; background:#1e293b; border-radius:8px; gap:10px; }
@@ -657,11 +657,11 @@ footer input[type="text"] {
 .checklist-item-checkbox { width:18px; height:18px; cursor:pointer; accent-color:#38bdf8; flex-shrink:0; }
 .checklist-item-text { flex:1; cursor:pointer; }
 .checklist-item-text.done { text-decoration:line-through; color:#64748b; }
-.checklist-item-meta { font-size:11px; color:#475569; margin-left:auto; white-space:nowrap; }
-.checklist-item-del { background:none; border:none; color:#ef4444; cursor:pointer; font-size:14px; padding:2px 6px; border-radius:4px; display:none; }
+.checklist-item-meta { font-size:14px; color:#475569; margin-left:auto; white-space:nowrap; }
+.checklist-item-del { background:none; border:none; color:#ef4444; cursor:pointer; font-size:18px; padding:2px 6px; border-radius:4px; display:none; }
 .checklist-item:hover .checklist-item-del { display:inline-block; }
 .checklist-item-del:hover { background:rgba(239,68,68,0.1); }
-.checklist-empty { text-align:center; padding:40px 20px; color:#64748b; font-size:14px; }
+.checklist-empty { text-align:center; padding:40px 20px; color:#64748b; font-size:18px; }
 /* Checklist v2 */
 .checklist-v2-container { max-width:700px; margin:0 auto; }
 .checklist-v2-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
@@ -672,15 +672,15 @@ footer input[type="text"] {
   user-select:none; transition:background 0.1s;
 }
 .checklist-board-header:hover { background:rgba(255,255,255,0.03); }
-.checklist-board-arrow { font-size:12px; color:#64748b; transition:transform 0.15s; }
+.checklist-board-arrow { font-size:15px; color:#64748b; transition:transform 0.15s; }
 .checklist-board-arrow.expanded { transform:rotate(90deg); }
-.checklist-board-title { font-weight:600; font-size:15px; flex:1; }
-.checklist-board-category { font-size:11px; padding:2px 8px; border-radius:10px; background:#334155; color:#94a3b8; }
+.checklist-board-title { font-weight:600; font-size:19px; flex:1; }
+.checklist-board-category { font-size:14px; padding:2px 8px; border-radius:10px; background:#334155; color:#94a3b8; }
 .checklist-board-tags { display:flex; gap:4px; }
-.checklist-board-tag { font-size:10px; padding:1px 6px; border-radius:8px; background:#0f172a; color:#64748b; }
-.checklist-board-pin-badge { font-size:13px; }
+.checklist-board-tag { font-size:12px; padding:1px 6px; border-radius:8px; background:#0f172a; color:#64748b; }
+.checklist-board-pin-badge { font-size:16px; }
 .checklist-board-actions { display:flex; gap:4px; margin-left:auto; }
-.checklist-board-actions button { background:none; border:none; color:#64748b; cursor:pointer; font-size:14px; padding:2px 6px; border-radius:4px; font-family:inherit; }
+.checklist-board-actions button { background:none; border:none; color:#64748b; cursor:pointer; font-size:18px; padding:2px 6px; border-radius:4px; font-family:inherit; }
 .checklist-board-actions button:hover { color:#e2e8f0; background:rgba(255,255,255,0.05); }
 .checklist-board-body { padding:0 14px 12px; display:none; }
 .checklist-board-body.expanded { display:block; }
@@ -688,16 +688,16 @@ footer input[type="text"] {
 .checklist-board-item { display:flex; align-items:center; padding:8px 10px; background:#0f172a; border-radius:6px; gap:8px; }
 .checklist-board-item.done { opacity:0.6; }
 .checklist-board-item-checkbox { width:16px; height:16px; cursor:pointer; accent-color:#38bdf8; flex-shrink:0; }
-.checklist-board-item-text { flex:1; font-size:13px; cursor:pointer; }
+.checklist-board-item-text { flex:1; font-size:16px; cursor:pointer; }
 .checklist-board-item-text.done { text-decoration:line-through; color:#64748b; }
-.checklist-board-item-meta { font-size:11px; color:#475569; white-space:nowrap; }
-.checklist-board-item-del { background:none; border:none; color:#ef4444; cursor:pointer; font-size:13px; padding:2px 4px; border-radius:4px; display:none; }
+.checklist-board-item-meta { font-size:14px; color:#475569; white-space:nowrap; }
+.checklist-board-item-del { background:none; border:none; color:#ef4444; cursor:pointer; font-size:16px; padding:2px 4px; border-radius:4px; display:none; }
 .checklist-board-item:hover .checklist-board-item-del { display:inline-block; }
 .checklist-board-item-del:hover { background:rgba(239,68,68,0.1); }
 .checklist-board-add-bar { display:flex; gap:6px; }
-.checklist-board-add-bar input { flex:1; background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:6px 10px; border-radius:6px; font-size:13px; outline:none; }
+.checklist-board-add-bar input { flex:1; background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:6px 10px; border-radius:6px; font-size:16px; outline:none; }
 .checklist-board-add-bar input:focus { border-color:#38bdf8; }
-.checklist-board-empty { color:#475569; font-size:13px; text-align:center; padding:20px; }
+.checklist-board-empty { color:#475569; font-size:16px; text-align:center; padding:20px; }
 
 /* Color picker in form */
 .color-picker { display:flex; gap:6px; flex-wrap:wrap; }
@@ -706,8 +706,8 @@ footer input[type="text"] {
 .color-swatch.selected { border-color:#fff; box-shadow:0 0 0 2px #38bdf8; }
 
 /* Notice board v2 additions */
-.category-badge { font-size:11px; padding:2px 8px; border-radius:10px; font-weight:500; }
-.tag-badge { font-size:10px; padding:1px 6px; border-radius:8px; background:#1e293b; color:#94a3b8; border:1px solid #334155; }
+.category-badge { font-size:14px; padding:2px 8px; border-radius:10px; font-weight:500; }
+.tag-badge { font-size:12px; padding:1px 6px; border-radius:8px; background:#1e293b; color:#94a3b8; border:1px solid #334155; }
 .notice-card-category { display:flex; gap:6px; align-items:center; margin-bottom:4px; }
 .notice-card-tags { display:flex; gap:4px; flex-wrap:wrap; margin:4px 0; }
 </style>
@@ -717,7 +717,7 @@ footer input[type="text"] {
 <header>
     <h1>VCC Clipper v1.0</h1>
     <span class="status-badge disconnected" id="statusBadge">🔴 未連線</span>
-    <span class="peer-count" id="peerCount"></span>    <span class="display-name-label" style="color:#64748b;font-size:12px;">你現在顯示為：</span><span class="display-name-span" id="displayNameSpan"></span>
+    <span class="peer-count" id="peerCount"></span>    <span class="display-name-label" style="color:#64748b;font-size:15px;">你現在顯示為：</span><span class="display-name-span" id="displayNameSpan"></span>
 
     <div class="clock-display" id="clockDisplay">
         <span class="clock-time" id="clockTime">00:00:00</span>
@@ -758,7 +758,7 @@ footer input[type="text"] {
                 <input type="file" id="fileInput" multiple hidden>
             </div>
             <div class="file-target-select" id="fileTargetSelect" style="display:none">
-                <div style="font-size:13px;color:#94a3b8;margin-bottom:6px;">📤 傳送對象:</div>
+                <div style="font-size:16px;color:#94a3b8;margin-bottom:6px;">📤 傳送對象:</div>
                 <div id="peerTargetList"></div>
             </div>
             <div class="file-overall" id="fileOverall">0 / 0 個檔案完成</div>
@@ -786,30 +786,30 @@ footer input[type="text"] {
     </section>
 <section class="tab-pane" data-tab="about">
         <div style="max-width:500px;margin:0 auto;">
-            <h2 style="font-size:20px;font-weight:600;margin-bottom:12px;">關於 VCC Clipper</h2>
+            <h2 style="font-size:25px;font-weight:600;margin-bottom:12px;">關於 VCC Clipper</h2>
             <p style="color:#94a3b8;margin-bottom:20px;line-height:1.7;">
                 VCC Clipper 是一套內網跨子網 P2P 協作工具，透過 WebRTC 建立點對點連線，
             </p>
-            <table style="color:#94a3b8;font-size:13px;line-height:2;">
+            <table style="color:#94a3b8;font-size:16px;line-height:2;">
                 <tr><td style="padding-right:20px;color:#64748b;">版本</td><td>v1.0.0</td></tr>
                 <tr><td style="padding-right:20px;color:#64748b;">作者</td><td>RTHKVCC Team</td></tr>
                 <tr><td style="padding-right:20px;color:#64748b;">技術</td><td>WebRTC · WebSocket · Python</td></tr>
                 <tr><td style="padding-right:20px;color:#64748b;">授權</td><td>MIT</td></tr>
             </table>
-            <h3 style="font-size:15px;font-weight:500;margin-top:24px;margin-bottom:8px;">功能</h3>
-            <ul style="color:#94a3b8;font-size:13px;line-height:1.8;padding-left:20px;">
+            <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;">功能</h3>
+            <ul style="color:#94a3b8;font-size:16px;line-height:1.8;padding-left:20px;">
                 <li>💬 實時短信 — 即時訊息廣播</li>
                 <li>📁 檔案傳輸 — 拖放上傳，支援大檔案</li>
 
             </ul>
-            <h3 style="font-size:15px;font-weight:500;margin-top:24px;margin-bottom:8px;">已知限制</h3>
-            <ul style="color:#94a3b8;font-size:13px;line-height:1.8;padding-left:20px;">
+            <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;">已知限制</h3>
+            <ul style="color:#94a3b8;font-size:16px;line-height:1.8;padding-left:20px;">
                 <li>需要 Python 3.8+ 執行信令伺服器</li>
                 <li>跨子網需要網路設備支援 UDP 路由</li>
                 <li>實時短信訊息傳送需所有用戶保持連線</li>
             </ul>
             <p style="margin-top:24px;border-top:1px solid #1e293b;padding-top:16px;">
-                <button class="btn btn-secondary" id="btnDump" style="font-size:12px;">🔍 Debug Dump</button>
+                <button class="btn btn-secondary" id="btnDump" style="font-size:15px;">🔍 Debug Dump</button>
             </p>
         </div>
     </section>
@@ -1016,7 +1016,7 @@ function renderNoticeBoard() {
         return b.timestamp - a.timestamp;
     });
     if (sorted.length === 0) {
-        list.innerHTML = '<div style="color:#64748b;text-align:center;padding:40px;font-size:14px">📋 尚無公告，點擊上方按鈕新增</div>';
+        list.innerHTML = '<div style="color:#64748b;text-align:center;padding:40px;font-size:18px">📋 尚無公告，點擊上方按鈕新增</div>';
         return;
     }
     list.innerHTML = sorted.map(post => {
@@ -1872,7 +1872,7 @@ document.getElementById('displayNameSpan').addEventListener('click', function() 
     const input = document.createElement('input');
     input.type = 'text';
     input.value = APP.state.displayName;
-    input.style.cssText = 'font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid #38bdf8;background:#0f172a;color:#e2e8f0;outline:none;width:120px;font-family:inherit;';
+    input.style.cssText = 'font-size:16px;padding:4px 8px;border-radius:6px;border:1px solid #38bdf8;background:#0f172a;color:#e2e8f0;outline:none;width:120px;font-family:inherit;';
     this.style.display = 'none';
     this.parentNode.insertBefore(input, this.nextSibling);
     input.focus();
@@ -1929,7 +1929,7 @@ function renderChecklistBoards() {
     if (!container) return;
     const boards = APP.state.checklists;
     if (boards.length === 0) {
-        container.innerHTML = '<div style="color:#475569;font-size:14px;text-align:center;padding:40px;">暫無檢查清單，點擊上方按鈕新增</div>';
+        container.innerHTML = '<div style="color:#475569;font-size:18px;text-align:center;padding:40px;">暫無檢查清單，點擊上方按鈕新增</div>';
         return;
     }
     // Sort: pinned first (by createdAt desc), then unpinned (by createdAt desc)
@@ -1965,7 +1965,7 @@ function renderChecklistBoards() {
                 : '<div class="checklist-board-empty">暫無項目</div>')
             + '<div class="checklist-board-add-bar">'
             + '<input type="text" class="checklist-board-item-input" data-board-id="' + board.id + '" placeholder="新增項目，Enter 新增...">'
-            + '<button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" data-action="add-item-btn" data-id="' + board.id + '">新增</button>'
+            + '<button class="btn btn-primary" style="padding:4px 10px;font-size:15px;" data-action="add-item-btn" data-id="' + board.id + '">新增</button>'
             + '</div>'
             + '</div>'
             + '</div>';
@@ -2118,11 +2118,11 @@ function showChecklistForm(board) {
         return '<span class="color-swatch' + selected + '" data-color="' + c.value + '" style="background:' + c.value + ';" title="' + c.label + '"></span>';
     }).join('');
     overlay.innerHTML = '<div class="modal-dialog" style="max-width:420px;">'
-        + '<h3 style="font-size:16px;font-weight:600;margin-bottom:16px;">' + (isEdit ? '✏️ 編輯檢查清單' : '📋 新增檢查清單') + '</h3>'
+        + '<h3 style="font-size:20px;font-weight:600;margin-bottom:16px;">' + (isEdit ? '✏️ 編輯檢查清單' : '📋 新增檢查清單') + '</h3>'
         + '<input type="text" class="notice-form-input" id="clFormTitle" placeholder="標題（必填）" value="' + (isEdit ? escapeHtml(board.title) : '') + '">'
         + '<input type="text" class="notice-form-input" id="clFormCategory" placeholder="分類（選填）" value="' + (isEdit ? escapeHtml(board.category || '') : '') + '">'
         + '<input type="text" class="notice-form-input" id="clFormTags" placeholder="標籤，逗號分隔" value="' + (isEdit && board.tags ? escapeHtml(board.tags.join(',')) : '') + '">'
-        + '<div style="font-size:13px;color:#94a3b8;margin-bottom:8px;">顏色</div>'
+        + '<div style="font-size:16px;color:#94a3b8;margin-bottom:8px;">顏色</div>'
         + '<div class="color-picker" id="clFormColorPicker">' + colorsHtml + '</div>'
         + '<div class="notice-form-buttons" style="margin-top:16px;">'
         + '<button class="btn btn-secondary" id="clFormCancel">取消</button>'
@@ -2296,7 +2296,7 @@ function updateFileUI() {
     overall.textContent = `${doneCount} / ${items.length} 個檔案完成`;
 
     if (items.length === 0) {
-        queue.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;font-size:13px">尚未選擇檔案</div>';
+        queue.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;font-size:16px">尚未選擇檔案</div>';
         clearBtn.style.display = 'none';
         return;
     }
