@@ -6,6 +6,7 @@ import json
 import os
 import random
 import signal
+import sqlite3
 import string
 import time
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ MAX_PEERS_PER_ROOM = 50
 room_data = {}
 
 CHAT_RETENTION_DAYS = 7    # How long to keep chat backups (adjustable)
-DATA_FILE = "vcc_server_state.json"
+DB_PATH = "clipper_data.db"
 DEBUG = True   # Toggle verbose debug output
 
 
@@ -37,18 +38,67 @@ def _debug(message):
         print(f"  └─ [{ts}] {message}")
 
 
+def _init_db():
+    """Create SQLite tables if they don't exist."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("""CREATE TABLE IF NOT EXISTS rooms (
+        room_id TEXT PRIMARY KEY,
+        notice_posts TEXT NOT NULL DEFAULT '[]',
+        checklists TEXT NOT NULL DEFAULT '[]',
+        chat_messages TEXT NOT NULL DEFAULT '[]'
+    )""")
+    conn.commit()
+    conn.close()
+
+
 def _load_state():
+    """Load all rooms from SQLite into memory."""
     global room_data
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r') as f:
-            room_data = json.load(f)
-    else:
-        room_data = {}
+    room_data = {}
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        rows = conn.execute("SELECT room_id, notice_posts, checklists, chat_messages FROM rooms").fetchall()
+        for rid, np, cl, cm in rows:
+            room_data[rid] = {
+                "noticePosts": json.loads(np),
+                "checklists": json.loads(cl),
+                "chatMessages": json.loads(cm),
+            }
+    except sqlite3.OperationalError:
+        pass  # table doesn't exist yet
+    conn.close()
+    # Migrate old JSON if exists
+    OLD_JSON = "vcc_server_state.json"
+    if os.path.exists(OLD_JSON):
+        try:
+            with open(OLD_JSON, 'r') as f:
+                legacy = json.load(f)
+            for rid, data in legacy.items():
+                if rid not in room_data:
+                    room_data[rid] = data
+            _save_state()
+            os.rename(OLD_JSON, OLD_JSON + ".bak")
+            _log('MIGRATE', f'Imported {len(legacy)} rooms from legacy JSON, backed up as {OLD_JSON}.bak')
+        except Exception as e:
+            _log('MIGRATE', f'Failed to migrate legacy JSON: {e}')
 
 
 def _save_state():
-    with open(DATA_FILE, 'w') as f:
-        json.dump(room_data, f)
+    """Write all rooms to SQLite atomically."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        with conn:
+            for rid, data in room_data.items():
+                conn.execute(
+                    "INSERT OR REPLACE INTO rooms VALUES (?,?,?,?)",
+                    (rid,
+                     json.dumps(data.get("noticePosts", [])),
+                     json.dumps(data.get("checklists", [])),
+                     json.dumps(data.get("chatMessages", [])))
+                )
+    finally:
+        conn.close()
 
 
 def _migrate_room_data():
@@ -649,12 +699,13 @@ def _broadcast(room_peers, message, exclude=None):
 
 
 async def main():
+    _init_db()
     _load_state()
     _migrate_room_data()
     total_notices = sum(len(r.get("noticePosts", [])) for r in room_data.values())
     total_boards = sum(len(r.get("checklists", [])) for r in room_data.values())
     total_chats = sum(len(r.get("chatMessages", [])) for r in room_data.values())
-    _log('STARTUP', f'Loaded {len(room_data)} rooms from {DATA_FILE}')
+    _log('STARTUP', f'Loaded {len(room_data)} rooms from SQLite ({DB_PATH})')
     _log('STARTUP', f'Data: {total_notices} notices, {total_boards} boards, {total_chats} chat backups')
     _log('STARTUP', f'Chat retention: {CHAT_RETENTION_DAYS} days')
     _log('STARTUP', f'DEBUG mode: {"ON" if DEBUG else "OFF"}')
