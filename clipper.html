@@ -1117,6 +1117,8 @@ const APP = {
         checklists: [], // array of board objects
         lastSyncTime: null,
         pendingSync: false,
+        _reconnectCount: 0,
+        _reconnectTimer: null,
     },
     updateStatus(status) {
         const badge = document.getElementById('statusBadge');
@@ -1621,6 +1623,32 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 // ========== WebSocket ==========
 
+function autoReconnect() {
+    const count = APP.state._reconnectCount || 0;
+    const delay = Math.min(2000 * Math.pow(2, count), 30000);
+    if (APP.state._reconnectTimer) clearTimeout(APP.state._reconnectTimer);
+    APP.state._reconnectTimer = setTimeout(() => {
+        APP.state._reconnectCount++;
+        const url = document.getElementById('serverUrl').value.trim() || 'ws://localhost:8765';
+        APP.showStatusMsg(`🔄 第 ${APP.state._reconnectCount} 次重連 (${Math.round(delay / 1000)}s)...`);
+        APP.updateStatus('connecting');
+        connectWebSocket(url).then(() => {
+            APP.state._reconnectCount = 0;
+            APP.state._reconnectTimer = null;
+            document.getElementById('errorToast').className = '';
+            if (APP.state.room) {
+                sendWsMessage({type: 'join', room: APP.state.room});
+            } else {
+                sendWsMessage({type: 'generate'});
+            }
+        }).catch(() => {
+            APP.showStatusMsg(`❌ 重連失敗 (${APP.state._reconnectCount} 次)`);
+            autoReconnect();
+        });
+    }, delay);
+    APP.showStatusMsg(`🔄 ${Math.round(delay / 1000)} 秒後自動重連...`);
+}
+
 function connectWebSocket(url) {
     return new Promise((resolve, reject) => {
         const ws = new WebSocket(url);
@@ -1641,7 +1669,8 @@ function connectWebSocket(url) {
                 if (APP.state.room) {
                     cleanupConnection();
                     if (!APP.state.intentionalDisconnect) {
-                        APP.showError('⚠ 信令伺服器離線', true);
+                        APP.showError(`⚠ 信令伺服器離線 — ${APP.state._reconnectCount || 0 > 0 ? `第 ${APP.state._reconnectCount} 次重連中...` : '即將自動重連'}`, false);
+                        autoReconnect();
                     }
                     APP.showStatusMsg('連線中斷');
                 }
