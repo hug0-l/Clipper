@@ -668,6 +668,30 @@ footer input[type="text"] {
     padding-top: 8px;
     border-top: 1px solid #334155;
 }
+/* --- Checklist Template System --- */
+.cl-tab-bar { display:flex; gap:4px; align-items:center; margin-bottom:12px; background:#111827; border-radius:8px; padding:4px; }
+.cl-tab-btn { background:transparent; border:none; color:#94a3b8; cursor:pointer; font-size:14px; padding:6px 14px; border-radius:6px; font-family:inherit; transition:all 0.1s; }
+.cl-tab-btn:hover { color:#e2e8f0; background:rgba(255,255,255,0.05); }
+.cl-tab-btn.active { color:#e2e8f0; background:#1e293b; }
+.cl-pane { display:none; flex-direction:column; flex:1; min-height:0; }
+.cl-pane-active { display:flex; }
+.tpl-header { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+.tpl-stats-bar { display:flex; gap:16px; padding:8px 12px; background:#111827; border-radius:8px; margin-bottom:12px; font-size:14px; color:#94a3b8; }
+.tpl-stats-bar strong { color:#e2e8f0; }
+.tpl-grid { display:flex; flex-direction:column; gap:8px; flex:1; overflow-y:auto; }
+.tpl-card { background:#1e293b; border-radius:10px; padding:12px 16px; display:flex; align-items:center; gap:12px; border-left:4px solid #38bdf8; transition:background 0.1s; }
+.tpl-card:hover { background:rgba(56,189,248,0.04); }
+.tpl-card-icon { font-size:24px; flex-shrink:0; }
+.tpl-card-info { flex:1; min-width:0; }
+.tpl-card-title { font-weight:600; font-size:16px; color:#e2e8f0; }
+.tpl-card-meta { font-size:12px; color:#64748b; margin-top:2px; }
+.tpl-card-desc { font-size:13px; color:#94a3b8; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tpl-card-actions { display:flex; gap:4px; flex-shrink:0; }
+.tpl-card-actions button { background:transparent; border:none; color:#64748b; cursor:pointer; font-size:16px; padding:4px 6px; border-radius:4px; transition:color 0.1s,background 0.1s; }
+.tpl-card-actions button:hover { color:#e2e8f0; background:rgba(255,255,255,0.05); }
+.tpl-card-actions .use-btn { color:#38bdf8; }
+.tpl-card-actions .use-btn:hover { background:rgba(56,189,248,0.1); }
+.tpl-empty { color:#64748b; text-align:center; padding:40px; font-size:15px; }
 
 /* --- CMS Notice Management --- */
 .cms-container { max-width: 960px; margin: 0 auto; display:flex; flex-direction:column; flex:1; }
@@ -993,11 +1017,38 @@ footer input[type="text"] {
 
         <section class="tab-pane" data-tab="checklist">
         <div class="checklist-v2-container">
-            <div class="checklist-v2-header">
-                <h2>✅ 檢查清單</h2>
-                <button class="btn btn-primary" id="btnNewChecklist">📋 新增檢查清單</button>
+            <div class="cl-tab-bar">
+                <button class="cl-tab-btn active" data-cltab="active">📋 進行中</button>
+                <button class="cl-tab-btn" data-cltab="templates">📁 範本庫</button>
+                <span style="flex:1;"></span>
+                <button class="btn btn-primary" id="btnNewChecklist" style="font-size:13px;padding:6px 12px;">✏️ 新增檢查表</button>
             </div>
-            <div class="checklist-v2-boards" id="checklistBoards"></div>
+            <div class="cl-pane cl-pane-active" id="clPaneActive">
+                <div class="checklist-v2-boards" id="checklistBoards"></div>
+            </div>
+            <div class="cl-pane" id="clPaneTemplates" style="display:none;">
+                <div class="tpl-header">
+                    <input type="text" class="cms-search" id="tplSearch" placeholder="🔍 搜尋範本..." style="flex:1;min-width:120px;">
+                    <button class="btn btn-secondary" id="btnTplSearch" style="font-size:13px;padding:4px 10px;">🔍 搜尋</button>
+                    <select class="cms-filter" id="tplFilterCat">
+                        <option value="">全部分類</option>
+                        <option value="每日檢查">每日檢查</option>
+                        <option value="每週檢查">每週檢查</option>
+                        <option value="每月檢查">每月檢查</option>
+                        <option value="事故應變">事故應變</option>
+                        <option value="交接事項">交接事項</option>
+                        <option value="其他">其他</option>
+                    </select>
+                    <button class="btn btn-primary" id="btnNewTemplate" style="font-size:13px;padding:6px 12px;">📁 新增範本</button>
+                </div>
+                <div class="tpl-stats-bar">
+                    <span>範本總數: <strong id="tplTotal">0</strong></span>
+                    <span>可用類別: <strong id="tplCategories">0</strong></span>
+                </div>
+                <div class="tpl-grid" id="tplGrid">
+                    <div style="color:#64748b;text-align:center;padding:40px;">尚無範本，建立第一個範本以便快速部署檢查表</div>
+                </div>
+            </div>
         </div>
     </section>
 <section class="tab-pane" data-tab="settings">
@@ -1159,6 +1210,7 @@ const APP = {
         persistedChatMessages: [],
         sentMessages: new Map(), // msgId -> {text, ts, acks:Set(peerId), totalPeers: int}
         checklists: [], // array of board objects
+        checklistTemplates: [], // array of template objects {id, title, category, description, color, tags, items[{text}], createdBy, createdAt}
         lastSyncTime: null,
         pendingSync: false,
         _reconnectCount: 0,
@@ -2984,11 +3036,225 @@ setInterval(() => {
 
 // ========== Checklist v2 Init ==========
 APP.state.checklists = loadFromStorage(APP.roomKey('vcc_checklists'), []);
+APP.state.checklistTemplates = loadFromStorage(APP.roomKey('vcc_checklist_templates'), []);
 renderChecklistBoards();
+renderTemplates();
 
 document.getElementById('btnNewChecklist').addEventListener('click', () => {
     showChecklistForm();
 });
+
+// ========== Checklist Template System ==========
+// Tab switching
+document.querySelectorAll('.cl-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.cl-tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.cl-pane').forEach(p => p.style.display = 'none');
+        const target = btn.dataset.cltab;
+        if (target === 'active') document.getElementById('clPaneActive').style.display = 'flex';
+        else document.getElementById('clPaneTemplates').style.display = 'flex';
+    });
+});
+
+function renderTemplates() {
+    const grid = document.getElementById('tplGrid');
+    if (!grid) return;
+    const templates = APP.state.checklistTemplates;
+    document.getElementById('tplTotal').textContent = templates.length;
+    const cats = new Set(templates.filter(t => t.category).map(t => t.category));
+    document.getElementById('tplCategories').textContent = cats.size;
+
+    // Filter
+    const search = (document.getElementById('tplSearch')?.value || '').toLowerCase();
+    const catFilter = document.getElementById('tplFilterCat')?.value || '';
+    let filtered = templates;
+    if (catFilter) filtered = filtered.filter(t => t.category === catFilter);
+    if (search) filtered = filtered.filter(t =>
+        (t.title || '').toLowerCase().includes(search) ||
+        (t.description || '').toLowerCase().includes(search) ||
+        (t.tags || []).some(tg => tg.toLowerCase().includes(search))
+    );
+
+    if (filtered.length === 0) {
+        grid.innerHTML = '<div class="tpl-empty">📁 ' + (templates.length === 0 ? '尚無範本，建立第一個範本以便快速部署檢查表' : '無符合條件的範本') + '</div>';
+        return;
+    }
+    grid.innerHTML = filtered.map(tpl => {
+        const catColor = getCategoryColor(tpl.category || '') || '#38bdf8';
+        const catLabel = tpl.category || '未分類';
+        const itemCount = (tpl.items || []).length;
+        return '<div class="tpl-card" style="border-left-color:' + catColor + '">'
+            + '<div class="tpl-card-icon">📋</div>'
+            + '<div class="tpl-card-info">'
+            + '<div class="tpl-card-title">' + escapeHtml(tpl.title) + '</div>'
+            + '<div class="tpl-card-meta">' + escapeHtml(catLabel) + ' · ' + itemCount + ' 個項目 · ' + escapeHtml(tpl.createdBy) + '</div>'
+            + (tpl.description ? '<div class="tpl-card-desc">' + escapeHtml(tpl.description) + '</div>' : '')
+            + '</div>'
+            + '<div class="tpl-card-actions">'
+            + '<button class="use-btn" data-action="use" data-id="' + tpl.id + '" title="建立副本">📋 使用</button>'
+            + '<button data-action="edit" data-id="' + tpl.id + '" title="編輯">✏️</button>'
+            + '<button data-action="delete" data-id="' + tpl.id + '" title="刪除" style="color:#ef4444;">🗑</button>'
+            + '</div></div>';
+    }).join('');
+
+    grid.querySelectorAll('[data-action="use"]').forEach(btn => {
+        btn.addEventListener('click', () => useTemplate(btn.dataset.id));
+    });
+    grid.querySelectorAll('[data-action="edit"]').forEach(btn => {
+        btn.addEventListener('click', () => showTemplateForm(btn.dataset.id));
+    });
+    grid.querySelectorAll('[data-action="delete"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!await showConfirmDialog('確定刪除此範本？')) return;
+            APP.state.checklistTemplates = APP.state.checklistTemplates.filter(t => t.id !== btn.dataset.id);
+            saveToStorage(APP.roomKey('vcc_checklist_templates'), APP.state.checklistTemplates);
+            renderTemplates();
+        });
+    });
+}
+
+function useTemplate(tplId) {
+    const tpl = APP.state.checklistTemplates.find(t => t.id === tplId);
+    if (!tpl) { APP.showStatusMsg('❌ 找不到該範本'); return; }
+    if (!APP.state.connected || !APP.state.room) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
+    const newBoard = {
+        id: crypto.randomUUID(),
+        title: tpl.title + ' (副本)',
+        category: tpl.category || '',
+        tags: [...(tpl.tags || [])],
+        color: tpl.color || '#38bdf8',
+        pinned: false,
+        createdBy: APP.state.displayName,
+        createdAt: Date.now(),
+        items: (tpl.items || []).map(item => ({
+            id: crypto.randomUUID(),
+            text: typeof item === 'string' ? item : (item.text || ''),
+            checked: false,
+            addedBy: APP.state.displayName,
+            timestamp: Date.now(),
+            checkedAt: null
+        }))
+    };
+    APP.state.checklists.push(newBoard);
+    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
+    sendWsMessage({type: 'checklistboard-create', room: APP.state.room, board: newBoard});
+    renderChecklistBoards();
+    // Switch to active tab
+    document.querySelector('[data-cltab="active"]')?.click();
+    APP.showStatusMsg('✅ 已從範本建立「' + newBoard.title + '」');
+}
+
+function showTemplateForm(tplId) {
+    const existing = document.querySelector('.tpl-form-overlay');
+    if (existing) existing.remove();
+    const isEdit = !!tplId;
+    const tpl = isEdit ? APP.state.checklistTemplates.find(t => t.id === tplId) : null;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay tpl-form-overlay';
+    const itemsHtml = tpl ? (tpl.items || []).map((item, i) =>
+        '<div style="display:flex;gap:6px;margin-bottom:4px;"><input class="tpl-item-input" id="tplItem_' + i + '" value="' + escapeHtml(typeof item === 'string' ? item : (item.text || '')) + '" style="flex:1;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:14px;outline:none;font-family:inherit;"><button class="btn-icon tpl-remove-item" style="color:#ef4444;font-size:14px;">✕</button></div>'
+    ).join('') : '';
+    const itemCount = tpl ? (tpl.items || []).length : 0;
+    overlay.innerHTML = '<div class="modal-dialog" style="max-width:480px;">'
+        + '<h3 style="font-size:20px;font-weight:600;margin-bottom:12px;">' + (isEdit ? '✏️ 編輯範本' : '📁 新增範本') + '</h3>'
+        + '<input type="text" class="notice-form-input" id="tplFormTitle" placeholder="範本名稱（必填）" value="' + (tpl ? escapeHtml(tpl.title) : '') + '">'
+        + '<input type="text" class="notice-form-input" id="tplFormDesc" placeholder="描述（選填）" value="' + (tpl ? escapeHtml(tpl.description || '') : '') + '">'
+        + '<select class="notice-form-input" id="tplFormCat">'
+        + '<option value="">無分類</option>'
+        + '<option value="每日檢查"' + (isEdit && tpl.category === '每日檢查' ? ' selected' : '') + '>每日檢查</option>'
+        + '<option value="每週檢查"' + (isEdit && tpl.category === '每週檢查' ? ' selected' : '') + '>每週檢查</option>'
+        + '<option value="每月檢查"' + (isEdit && tpl.category === '每月檢查' ? ' selected' : '') + '>每月檢查</option>'
+        + '<option value="事故應變"' + (isEdit && tpl.category === '事故應變' ? ' selected' : '') + '>事故應變</option>'
+        + '<option value="交接事項"' + (isEdit && tpl.category === '交接事項' ? ' selected' : '') + '>交接事項</option>'
+        + '<option value="其他"' + (isEdit && tpl.category === '其他' ? ' selected' : '') + '>其他</option>'
+        + '</select>'
+        + '<input type="text" class="notice-form-input" id="tplFormTags" placeholder="標籤，逗號分隔" value="' + (isEdit && tpl.tags ? escapeHtml(tpl.tags.join(',')) : '') + '">'
+        + '<div style="font-size:15px;color:#94a3b8;margin-bottom:6px;">項目清單 <span style="font-size:12px;color:#475569;">（每個項目一行）</span></div>'
+        + '<div id="tplItemsContainer" style="margin-bottom:8px;">' + itemsHtml + '</div>'
+        + (itemCount === 0 ? '<div style="color:#475569;font-size:13px;margin-bottom:8px;" id="tplNoItems">尚未新增項目</div>' : '')
+        + '<button class="btn btn-secondary" id="tplAddItem" style="font-size:12px;padding:4px 10px;margin-bottom:12px;">➕ 新增項目</button>'
+        + '<div class="notice-form-buttons">'
+        + '<button class="btn btn-secondary" id="tplFormCancel">取消</button>'
+        + '<button class="btn btn-primary" id="tplFormSave">' + (isEdit ? '儲存' : '建立') + '</button>'
+        + '</div></div>';
+    document.body.appendChild(overlay);
+
+    // Add item button
+    let itemIdx = isEdit ? (tpl.items || []).length : 0;
+    document.getElementById('tplAddItem').addEventListener('click', () => {
+        const container = document.getElementById('tplItemsContainer');
+        const noItems = document.getElementById('tplNoItems');
+        if (noItems) noItems.remove();
+        const div = document.createElement('div');
+        div.style.cssText = 'display:flex;gap:6px;margin-bottom:4px;';
+        div.innerHTML = '<input class="tpl-item-input" id="tplItem_' + itemIdx + '" style="flex:1;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:14px;outline:none;font-family:inherit;" placeholder="輸入項目..."><button class="btn-icon tpl-remove-item" style="color:#ef4444;font-size:14px;">✕</button>';
+        container.appendChild(div);
+        div.querySelector('.tpl-remove-item').addEventListener('click', () => { div.remove(); });
+        document.getElementById('tplItem_' + itemIdx).focus();
+        itemIdx++;
+    });
+    // Remove item buttons
+    overlay.querySelectorAll('.tpl-remove-item').forEach(btn => {
+        btn.addEventListener('click', function() { this.parentElement.remove(); });
+    });
+
+    document.getElementById('tplFormCancel').addEventListener('click', () => overlay.remove());
+    document.getElementById('tplFormSave').addEventListener('click', () => {
+        const title = document.getElementById('tplFormTitle').value.trim();
+        if (!title) { APP.showStatusMsg('❌ 範本名稱不能為空'); return; }
+        const desc = document.getElementById('tplFormDesc').value.trim();
+        const cat = document.getElementById('tplFormCat').value;
+        const tagsStr = document.getElementById('tplFormTags').value.trim();
+        const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+        const itemInputs = overlay.querySelectorAll('.tpl-item-input');
+        const items = [];
+        itemInputs.forEach(inp => {
+            const v = inp.value.trim();
+            if (v) items.push({text: v});
+        });
+        if (isEdit) {
+            const existing = APP.state.checklistTemplates.find(t => t.id === tplId);
+            if (existing) {
+                existing.title = title;
+                existing.description = desc;
+                existing.category = cat;
+                existing.tags = tags;
+                existing.items = items;
+                existing.editedAt = Date.now();
+            }
+        } else {
+            APP.state.checklistTemplates.push({
+                id: crypto.randomUUID(),
+                title,
+                description: desc,
+                category: cat,
+                tags,
+                color: '#38bdf8',
+                items,
+                createdBy: APP.state.displayName,
+                createdAt: Date.now()
+            });
+        }
+        saveToStorage(APP.roomKey('vcc_checklist_templates'), APP.state.checklistTemplates);
+        renderTemplates();
+        overlay.remove();
+        APP.showStatusMsg(isEdit ? '✅ 範本已更新' : '✅ 範本已建立');
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('tplFormTitle').focus();
+}
+
+// Template search/filter
+document.getElementById('tplSearch')?.addEventListener('input', renderTemplates);
+document.getElementById('tplSearch')?.addEventListener('keydown', function(e) { if (e.key === 'Enter') renderTemplates(); });
+document.getElementById('btnTplSearch')?.addEventListener('click', renderTemplates);
+document.getElementById('tplFilterCat')?.addEventListener('change', renderTemplates);
+document.getElementById('btnNewTemplate')?.addEventListener('click', () => showTemplateForm(null));
+
 // ========== File Transfer ===
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 B';
