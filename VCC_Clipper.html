@@ -1448,6 +1448,19 @@ function handleWsMessage(data) {
             }
             break;
 
+        case 'checklistboard-remind':
+            // data.id, data.reminderAt, data.reminderTitle
+            {
+                const remBoard = APP.state.checklists.find(b => b.id === data.id);
+                if (remBoard) {
+                    remBoard.reminderAt = data.reminderAt;
+                    remBoard.reminderTitle = data.reminderTitle || '';
+                    saveToStorage('vcc_checklists', APP.state.checklists);
+                    renderChecklistBoards();
+                }
+            }
+            break;
+
         case 'checklist-add':
             // data.checklistId, data.item
             {
@@ -2017,8 +2030,10 @@ function renderChecklistBoards() {
             + '<span class="checklist-board-actions">'
             + '<button class="btn-icon" data-action="add-item" data-id="' + board.id + '" title="新增項目">➕</button>'
             + '<button class="btn-icon" data-action="edit" data-id="' + board.id + '" title="編輯">✏️</button>'
+            + (board.reminderAt ? '<span class="checklist-board-pin-badge" title="排程提醒於 ' + new Date(board.reminderAt).toLocaleString('zh-TW') + '">🔔 ' + new Date(board.reminderAt).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'}) + '</span>' : '')
             + '<button class="btn-icon" data-action="pin" data-id="' + board.id + '" title="' + (board.pinned ? '取消置頂' : '置頂') + '">📌</button>'
             + '<button class="btn-icon cl-reset-btn" data-action="reset" data-id="' + board.id + '" title="全部重設" style="color:#f59e0b">🔄</button>'
+            + '<button class="btn-icon" data-action="remind" data-id="' + board.id + '" title="設定提醒">🔔</button>'
             + '<button class="btn-icon" data-action="delete" data-id="' + board.id + '" title="刪除" style="color:#ef4444">🗑</button>'
             + '</span>'
             + '</div>'
@@ -2079,6 +2094,12 @@ function renderChecklistBoards() {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
             resetChecklistBoard(this.dataset.id);
+        });
+    });
+    container.querySelectorAll('[data-action="remind"]').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            showChecklistReminderForm(this.dataset.id);
         });
     });
     container.querySelectorAll('[data-action="delete"]').forEach(btn => {
@@ -2328,6 +2349,78 @@ function resetChecklistBoard(checklistId) {
     renderChecklistBoards();
     APP.showStatusMsg('🔄 已重設所有勾選');
 }
+
+// ========== Checklist Reminder ==========
+function showChecklistReminderForm(checklistId) {
+    const board = APP.state.checklists.find(b => b.id === checklistId);
+    if (!board) return;
+    const existingOverlay = document.querySelector('.cl-reminder-form');
+    if (existingOverlay) existingOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay cl-reminder-form';
+    const currentVal = board.reminderAt ? new Date(board.reminderAt).toISOString().slice(0, 16) : '';
+    overlay.innerHTML = '<div class="modal-dialog" style="max-width:360px;">'
+        + '<h3 style="font-size:20px;font-weight:600;margin-bottom:12px;">🔔 排程提醒</h3>'
+        + '<p style="font-size:16px;color:#94a3b8;margin-bottom:12px;">' + escapeHtml(board.title) + '</p>'
+        + '<label style="font-size:16px;color:#94a3b8;display:block;margin-bottom:4px;">提醒時間</label>'
+        + '<input type="datetime-local" class="notice-form-input" id="clRemindTime" value="' + currentVal + '">'
+        + '<label style="font-size:16px;color:#94a3b8;display:block;margin:8px 0 4px;">提醒標題（選填）</label>'
+        + '<input type="text" class="notice-form-input" id="clRemindTitle" placeholder="例如：請完成開發工作" value="' + (board.reminderTitle ? escapeHtml(board.reminderTitle) : '') + '">'
+        + '<div class="notice-form-buttons" style="margin-top:16px;">'
+        + '<button class="btn btn-secondary" id="clRemindCancel">取消</button>'
+        + '<button class="btn btn-secondary" id="clRemindClear" style="color:#ef4444;border-color:#ef4444;">清除提醒</button>'
+        + '<button class="btn btn-primary" id="clRemindSave">設定</button>'
+        + '</div></div>';
+    document.body.appendChild(overlay);
+
+    document.getElementById('clRemindCancel').addEventListener('click', () => overlay.remove());
+    document.getElementById('clRemindClear').addEventListener('click', () => {
+        setChecklistReminder(checklistId, null, '');
+        overlay.remove();
+        APP.showStatusMsg('✅ 提醒已清除');
+    });
+    document.getElementById('clRemindSave').addEventListener('click', () => {
+        const dt = document.getElementById('clRemindTime').value;
+        if (!dt) { APP.showStatusMsg('❌ 請選擇提醒時間'); return; }
+        const ts = new Date(dt).getTime();
+        const title = document.getElementById('clRemindTitle').value.trim();
+        setChecklistReminder(checklistId, ts, title);
+        overlay.remove();
+        APP.showStatusMsg('✅ 提醒已設定於 ' + new Date(ts).toLocaleString('zh-TW'));
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+function setChecklistReminder(checklistId, reminderAt, reminderTitle) {
+    const board = APP.state.checklists.find(b => b.id === checklistId);
+    if (!board) return;
+    board.reminderAt = reminderAt;
+    board.reminderTitle = reminderTitle || '';
+    saveToStorage('vcc_checklists', APP.state.checklists);
+    sendWsMessage({type: 'checklistboard-remind', room: APP.state.room, id: checklistId, reminderAt, reminderTitle: board.reminderTitle});
+    renderChecklistBoards();
+}
+
+// Periodic reminder checker — every 15 seconds
+setInterval(() => {
+    const now = Date.now();
+    for (const board of APP.state.checklists) {
+        if (board.reminderAt && board.reminderAt <= now) {
+            // Fire the reminder
+            showPopup('🔔', '檢查清單提醒', (board.reminderTitle || board.title) + ' ⏰');
+            // Clear the reminder so it doesn't fire again
+            board.reminderAt = null;
+            board.reminderTitle = '';
+            saveToStorage('vcc_checklists', APP.state.checklists);
+            // Also tell server to clear it
+            if (APP.state.connected && APP.state.room) {
+                sendWsMessage({type: 'checklistboard-remind', room: APP.state.room, id: board.id, reminderAt: null, reminderTitle: ''});
+            }
+            renderChecklistBoards();
+        }
+    }
+}, 15000);
 
 // ========== Checklist v2 Init ==========
 APP.state.checklists = loadFromStorage('vcc_checklists', []);

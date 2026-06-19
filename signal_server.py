@@ -388,6 +388,28 @@ async def handler(websocket):
                 )
                 _save_state()
 
+            elif msg_type == "checklistboard-remind":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                remind_id = data.get("id")
+                remind_at = data.get("reminderAt")      # epoch ms or null to clear
+                remind_title = data.get("reminderTitle", "")
+                for board in room_data[rid]["checklists"]:
+                    if board.get("id") == remind_id:
+                        board["reminderAt"] = remind_at
+                        board["reminderTitle"] = remind_title
+                        break
+                _broadcast(
+                    rooms[rid],
+                    {"type": "checklistboard-remind", "id": remind_id, "reminderAt": remind_at, "reminderTitle": remind_title},
+                    exclude=websocket,
+                )
+                _save_state()
+                _log('CHECKLIST', f'{my_peer_id} set reminder for board {remind_id} in {rid}')
+
             elif msg_type == "checklist-add":
                 rid = data.get("room")
                 if not rid or rid not in rooms:
