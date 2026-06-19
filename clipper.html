@@ -918,6 +918,65 @@ footer input[type="text"] {
 .admin-pane-active { display:block; }
 .log-viewer::-webkit-scrollbar { width:4px; }
 .log-viewer::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.08); border-radius:2px; }
+.keymgmt-card {
+    background: #1e293b;
+    border-radius: 10px;
+    padding: 14px 18px;
+    border-left: 4px solid #38bdf8;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: border-color 0.2s;
+}
+.keymgmt-card.active { border-left-color: #22c55e; }
+.keymgmt-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.keymgmt-card-label {
+    flex: 1;
+    font-weight: 600;
+    font-size: 18px;
+}
+.keymgmt-active-badge {
+    font-size: 13px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+}
+.keymgmt-active-badge.on { background: #064e3b; color: #4ade80; }
+.keymgmt-active-badge.off { background: #1e293b; color: #64748b; }
+.keymgmt-card-url {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 13px;
+    color: #94a3b8;
+    word-break: break-all;
+}
+.keymgmt-card-key {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 14px;
+    color: #fbbf24;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.keymgmt-card-program {
+    font-size: 14px;
+    color: #e2e8f0;
+}
+.keymgmt-copy-btn {
+    font-size: 12px;
+    padding: 2px 8px;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+}
+.keymgmt-copy-btn:hover { border-color: #38bdf8; color: #38bdf8; }
 </style>
 </head>
 <body>
@@ -942,6 +1001,7 @@ footer input[type="text"] {
     <button class="tab-btn" data-target="checklist">✅ 檢查清單</button>
     <button class="tab-btn" data-target="settings">⚙️ 設定</button>
     <button class="tab-btn" data-target="admin">🔐 管理</button>
+    <button class="tab-btn" data-target="keymgmt">📡 密鑰管理</button>
     <button class="tab-btn" data-target="about">ℹ️ 關於</button>
     <div class="tab-spacer"></div>
 </nav>
@@ -1290,6 +1350,20 @@ footer input[type="text"] {
             </p>
         </div>
     </section>
+    <section class="tab-pane" data-tab="keymgmt">
+        <div class="keymgmt-container" style="max-width:700px;margin:0 auto;display:flex;flex-direction:column;gap:12px;">
+            <div class="keymgmt-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <h2 style="font-size:22px;font-weight:600;">📡 密鑰管理</h2>
+                <div>
+                    <span id="keymgmtStats" style="font-size:15px;color:#94a3b8;margin-right:12px;"></span>
+                    <button class="btn btn-primary" id="btnNewKey">+ 新增密鑰</button>
+                </div>
+            </div>
+            <div id="keymgmtCards" style="display:flex;flex-direction:column;gap:8px;">
+                <div style="color:#475569;text-align:center;padding:40px;">尚無密鑰，點擊上方按鈕新增</div>
+            </div>
+        </div>
+    </section>
     </div><!-- /main-content -->
     <div class="notice-sidebar" id="noticeSidebar">
         <div class="notice-container">
@@ -1342,6 +1416,7 @@ const APP = {
         sentMessages: new Map(), // msgId -> {text, ts, acks:Set(peerId), totalPeers: int}
         checklists: [], // array of board objects
         checklistTemplates: [], // array of template objects {id, title, category, description, color, tags, items[{text}], createdBy, createdAt}
+        keyManagements: [],
         lastSyncTime: null,
         pendingSync: false,
         _reconnectCount: 0,
@@ -1933,6 +2008,199 @@ function showPopup(icon, title, body) {
     }
 }
 
+// ========== Key Management ==========
+function renderKeyManagement() {
+    const cards = document.getElementById('keymgmtCards');
+    const stats = document.getElementById('keymgmtStats');
+    if (!cards) return;
+    const entries = APP.state.keyManagements;
+    const sorted = [...entries].sort((a, b) => b.createdAt - a.createdAt);
+    const activeCount = entries.filter(e => e.isActive).length;
+    if (stats) stats.textContent = '共 ' + entries.length + ' 個密鑰，' + activeCount + ' 個使用中';
+    if (sorted.length === 0) {
+        cards.innerHTML = '<div style="color:#475569;text-align:center;padding:40px;">尚無密鑰，點擊上方按鈕新增</div>';
+        return;
+    }
+    cards.innerHTML = sorted.map(entry => {
+        const activeClass = entry.isActive ? 'active' : '';
+        const badgeClass = entry.isActive ? 'on' : 'off';
+        const badgeText = entry.isActive ? '🟢 使用中' : '⚫ 未使用';
+        const maskedKey = entry.streamKey ? entry.streamKey.slice(0, 4) + '****' + entry.streamKey.slice(-4) : '----';
+        const urlTrunc = entry.streamUrl ? (entry.streamUrl.length > 40 ? entry.streamUrl.slice(0, 40) + '...' : entry.streamUrl) : '';
+        const progText = entry.currentProgram ? entry.currentProgram : '未設定節目';
+        return '<div class="keymgmt-card ' + activeClass + '">'
+            + '<div class="keymgmt-card-header">'
+            + '<span class="keymgmt-active-badge ' + badgeClass + '">' + badgeText + '</span>'
+            + '<span class="keymgmt-card-label">' + escapeHtml(entry.label) + '</span>'
+            + '<button class="btn-icon" data-action="edit" data-id="' + entry.id + '" title="編輯">✏️</button>'
+            + '<button class="btn-icon" data-action="toggle" data-id="' + entry.id + '" title="切換啟用狀態">🔀</button>'
+            + '<button class="btn-icon" data-action="delete" data-id="' + entry.id + '" title="刪除" style="color:#ef4444;">🗑</button>'
+            + '</div>'
+            + '<div class="keymgmt-card-url" title="' + escapeHtml(entry.streamUrl) + '">' + escapeHtml(urlTrunc) + '</div>'
+            + '<div class="keymgmt-card-key">🔑 ' + maskedKey + ' <button class="keymgmt-copy-btn" data-action="copy-key" data-id="' + entry.id + '">📋 複製</button> <button class="keymgmt-copy-btn" data-action="copy-url" data-id="' + entry.id + '">📋 複製網址</button></div>'
+            + '<div class="keymgmt-card-program">🎬 節目: ' + escapeHtml(progText) + ' <button class="keymgmt-copy-btn" data-action="set-program" data-id="' + entry.id + '">✏️ 設定節目</button></div>'
+            + '</div>';
+    }).join('');
+    // Wire up card action buttons
+    cards.querySelectorAll('[data-action="edit"]').forEach(btn => {
+        btn.addEventListener('click', function(e) { e.stopPropagation(); const entry = APP.state.keyManagements.find(e => e.id === this.dataset.id); if (entry) showKeyForm(entry); });
+    });
+    cards.querySelectorAll('[data-action="toggle"]').forEach(btn => {
+        btn.addEventListener('click', function(e) { e.stopPropagation(); toggleKeyActive(this.dataset.id); });
+    });
+    cards.querySelectorAll('[data-action="delete"]').forEach(btn => {
+        btn.addEventListener('click', function(e) { e.stopPropagation(); deleteKeyEntry(this.dataset.id); });
+    });
+    cards.querySelectorAll('[data-action="copy-key"]').forEach(btn => {
+        btn.addEventListener('click', function(e) { e.stopPropagation(); const entry = APP.state.keyManagements.find(e => e.id === this.dataset.id); if (entry) { navigator.clipboard.writeText(entry.streamKey).then(() => APP.showStatusMsg('✅ 密鑰已複製')).catch(() => APP.showStatusMsg('❌ 複製失敗')); } });
+    });
+    cards.querySelectorAll('[data-action="copy-url"]').forEach(btn => {
+        btn.addEventListener('click', function(e) { e.stopPropagation(); const entry = APP.state.keyManagements.find(e => e.id === this.dataset.id); if (entry) { navigator.clipboard.writeText(entry.streamUrl).then(() => APP.showStatusMsg('✅ 網址已複製')).catch(() => APP.showStatusMsg('❌ 複製失敗')); } });
+    });
+    cards.querySelectorAll('[data-action="set-program"]').forEach(btn => {
+        btn.addEventListener('click', function(e) { e.stopPropagation(); showKeyProgramForm(this.dataset.id); });
+    });
+}
+
+function showKeyForm(entry) {
+    const existing = document.querySelector('.keymgmt-form-overlay');
+    if (existing) existing.remove();
+    const isEdit = !!entry;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay keymgmt-form-overlay';
+    overlay.innerHTML = '<div class="modal-dialog" style="max-width:420px;">'
+        + '<h3 style="font-size:20px;font-weight:600;margin-bottom:16px;">' + (isEdit ? '✏️ 編輯密鑰' : '➕ 新增密鑰') + '</h3>'
+        + '<input type="text" class="notice-form-input" id="keymgmtFormLabel" placeholder="標籤（必填）" value="' + (isEdit ? escapeHtml(entry.label) : '') + '">'
+        + '<input type="text" class="notice-form-input" id="keymgmtFormKey" placeholder="串流金鑰（必填）" value="' + (isEdit ? escapeHtml(entry.streamKey) : '') + '">'
+        + '<input type="text" class="notice-form-input" id="keymgmtFormUrl" placeholder="串流網址（必填）" value="' + (isEdit ? escapeHtml(entry.streamUrl) : '') + '">'
+        + '<input type="text" class="notice-form-input" id="keymgmtFormProgram" placeholder="節目名稱（選填）" value="' + (isEdit ? escapeHtml(entry.currentProgram || '') : '') + '">'
+        + '<div class="notice-form-buttons">'
+        + '<button class="btn btn-secondary" id="keymgmtFormCancel">取消</button>'
+        + '<button class="btn btn-primary" id="keymgmtFormSave">' + (isEdit ? '儲存' : '新增') + '</button>'
+        + '</div></div>';
+    document.body.appendChild(overlay);
+    document.getElementById('keymgmtFormCancel').addEventListener('click', () => overlay.remove());
+    document.getElementById('keymgmtFormSave').addEventListener('click', () => {
+        const label = document.getElementById('keymgmtFormLabel').value.trim();
+        const streamKey = document.getElementById('keymgmtFormKey').value.trim();
+        const streamUrl = document.getElementById('keymgmtFormUrl').value.trim();
+        const currentProgram = document.getElementById('keymgmtFormProgram').value.trim();
+        if (!label || !streamKey || !streamUrl) {
+            APP.showStatusMsg('❌ 標籤、金鑰和網址為必填');
+            return;
+        }
+        if (isEdit) {
+            editKeyEntry(entry.id, {label, streamKey, streamUrl, currentProgram});
+        } else {
+            createKeyEntry(label, streamKey, streamUrl, currentProgram);
+        }
+        overlay.remove();
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('keymgmtFormLabel').focus();
+}
+
+function showKeyProgramForm(entryId) {
+    const entry = APP.state.keyManagements.find(e => e.id === entryId);
+    if (!entry) return;
+    const existing = document.querySelector('.keymgmt-program-overlay');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay keymgmt-program-overlay';
+    overlay.innerHTML = '<div class="modal-dialog" style="max-width:360px;">'
+        + '<h3 style="font-size:20px;font-weight:600;margin-bottom:16px;">🎬 設定節目</h3>'
+        + '<p style="font-size:14px;color:#94a3b8;margin-bottom:8px;">' + escapeHtml(entry.label) + '</p>'
+        + '<input type="text" class="notice-form-input" id="keymgmtProgramInput" placeholder="節目名稱" value="' + escapeHtml(entry.currentProgram || '') + '">'
+        + '<div class="notice-form-buttons">'
+        + '<button class="btn btn-secondary" id="keymgmtProgramCancel">取消</button>'
+        + '<button class="btn btn-primary" id="keymgmtProgramSave">設定</button>'
+        + '</div></div>';
+    document.body.appendChild(overlay);
+    document.getElementById('keymgmtProgramCancel').addEventListener('click', () => overlay.remove());
+    document.getElementById('keymgmtProgramSave').addEventListener('click', () => {
+        const program = document.getElementById('keymgmtProgramInput').value.trim();
+        setKeyProgram(entryId, program);
+        overlay.remove();
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('keymgmtProgramInput').focus();
+}
+
+function createKeyEntry(label, streamKey, streamUrl, currentProgram) {
+    if (!APP.state.connected || !APP.state.room) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
+    const entry = {
+        id: crypto.randomUUID(),
+        label: label,
+        streamKey: streamKey,
+        streamUrl: streamUrl,
+        currentProgram: currentProgram || '',
+        isActive: false,
+        createdBy: APP.state.displayName,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+    };
+    APP.state.keyManagements.push(entry);
+    saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+    sendWsMessage({type: 'keymgmt-create', room: APP.state.room, entry: entry});
+    renderKeyManagement();
+    APP.showStatusMsg('✅ 密鑰已新增');
+}
+
+function editKeyEntry(id, updates) {
+    if (!APP.state.connected || !APP.state.room) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
+    const entry = APP.state.keyManagements.find(e => e.id === id);
+    if (!entry) return;
+    Object.assign(entry, updates);
+    entry.updatedAt = Date.now();
+    saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+    sendWsMessage({type: 'keymgmt-edit', room: APP.state.room, id: id, ...updates});
+    renderKeyManagement();
+    APP.showStatusMsg('✅ 密鑰已更新');
+}
+
+async function deleteKeyEntry(id) {
+    const entry = APP.state.keyManagements.find(e => e.id === id);
+    if (!entry) { APP.showStatusMsg('❌ 找不到該密鑰'); return; }
+    if (!await showConfirmDialog('確定刪除密鑰「' + entry.label + '」？')) return;
+    APP.state.keyManagements = APP.state.keyManagements.filter(e => e.id !== id);
+    saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+    sendWsMessage({type: 'keymgmt-delete', room: APP.state.room, id: id});
+    renderKeyManagement();
+    APP.showStatusMsg('✅ 密鑰已刪除');
+}
+
+function toggleKeyActive(id) {
+    const entry = APP.state.keyManagements.find(e => e.id === id);
+    if (!entry) return;
+    entry.isActive = !entry.isActive;
+    entry.updatedAt = Date.now();
+    saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+    sendWsMessage({type: 'keymgmt-toggle-active', room: APP.state.room, id: id});
+    renderKeyManagement();
+    APP.showStatusMsg(entry.isActive ? '🟢 已設為使用中' : '⚫ 已設為未使用');
+}
+
+function setKeyProgram(id, currentProgram) {
+    if (!APP.state.connected || !APP.state.room) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
+    const entry = APP.state.keyManagements.find(e => e.id === id);
+    if (!entry) return;
+    entry.currentProgram = currentProgram || '';
+    entry.updatedAt = Date.now();
+    saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+    sendWsMessage({type: 'keymgmt-set-program', room: APP.state.room, id: id, currentProgram: entry.currentProgram});
+    renderKeyManagement();
+    APP.showStatusMsg('✅ 節目已設定');
+}
+
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2046,8 +2314,10 @@ function handleWsMessage(data) {
             // Reload room-scoped data from localStorage
             APP.state.noticePosts = loadFromStorage(APP.roomKey('vcc_notice_posts'), []);
             APP.state.checklists = loadFromStorage(APP.roomKey('vcc_checklists'), []);
+            APP.state.keyManagements = loadFromStorage(APP.roomKey('vcc_keymgmt'), []);
             renderNoticeBoard();
             renderChecklistBoards();
+            renderKeyManagement();
             // Register display name with server (handles conflicts)
             sendWsMessage({type: 'register-name', room: APP.state.room, displayName: APP.state.displayName});
             // Fetch server-persisted state and time
@@ -2087,10 +2357,17 @@ function handleWsMessage(data) {
                     }
                 }
             }
+            if (data.keyManagements) {
+                const serverKeyIds = new Set(data.keyManagements.map(e => e.id));
+                const localOnlyKeys = APP.state.keyManagements.filter(e => !serverKeyIds.has(e.id));
+                APP.state.keyManagements = [...data.keyManagements, ...localOnlyKeys];
+            }
             saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
             saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
+            saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
             renderNoticeBoard();
             renderChecklistBoards();
+            renderKeyManagement();
             APP.updateSyncStatus();
             break;
 
@@ -2422,6 +2699,57 @@ function handleWsMessage(data) {
 
         case 'pong':
             // Heartbeat response — no action needed
+            break;
+
+        case 'keymgmt-create':
+            if (data.entry && !APP.state.keyManagements.some(e => e.id === data.entry.id)) {
+                APP.state.keyManagements.push(data.entry);
+                saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+                renderKeyManagement();
+                showPopup('📡', '新密鑰', data.entry.label);
+            }
+            break;
+
+        case 'keymgmt-edit':
+            {
+                const editEntry = APP.state.keyManagements.find(e => e.id === data.id);
+                if (editEntry) {
+                    if (data.label !== undefined) editEntry.label = data.label;
+                    if (data.streamKey !== undefined) editEntry.streamKey = data.streamKey;
+                    if (data.streamUrl !== undefined) editEntry.streamUrl = data.streamUrl;
+                    if (data.currentProgram !== undefined) editEntry.currentProgram = data.currentProgram;
+                    saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+                    renderKeyManagement();
+                }
+            }
+            break;
+
+        case 'keymgmt-delete':
+            APP.state.keyManagements = APP.state.keyManagements.filter(e => e.id !== data.id);
+            saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+            renderKeyManagement();
+            break;
+
+        case 'keymgmt-toggle-active':
+            {
+                const tglEntry = APP.state.keyManagements.find(e => e.id === data.id);
+                if (tglEntry) {
+                    tglEntry.isActive = !tglEntry.isActive;
+                    saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+                    renderKeyManagement();
+                }
+            }
+            break;
+
+        case 'keymgmt-set-program':
+            {
+                const progEntry = APP.state.keyManagements.find(e => e.id === data.id);
+                if (progEntry) {
+                    progEntry.currentProgram = data.currentProgram || '';
+                    saveToStorage(APP.roomKey('vcc_keymgmt'), APP.state.keyManagements);
+                    renderKeyManagement();
+                }
+            }
             break;
 
         default:
@@ -3366,6 +3694,12 @@ renderTemplates();
 document.getElementById('btnNewChecklist').addEventListener('click', () => {
     showChecklistForm();
 });
+
+// ========== Key Management Init ==========
+APP.state.keyManagements = loadFromStorage(APP.roomKey('vcc_keymgmt'), []);
+renderKeyManagement();
+
+document.getElementById('btnNewKey').addEventListener('click', () => showKeyForm(null));
 
 // ========== Checklist Template System ==========
 // Tab switching
