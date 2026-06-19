@@ -2876,17 +2876,27 @@ function startWebRTCPeer(targetPeerId, isInitiator, remoteOffer) {
             if (APP.state._pcRestartTimers.has(timerKey)) {
                 clearTimeout(APP.state._pcRestartTimers.get(timerKey));
             }
-            // Set a grace period before removing
+            // Set a grace period before marking relay-only
             APP.state._pcRestartTimers.set(timerKey, setTimeout(() => {
                 if (APP.state.peers.has(targetPeerId) && pc.connectionState !== 'connected') {
-                    removePeer(targetPeerId);
+                    const ps2 = APP.state.peers.get(targetPeerId);
+                    ps2.relay = true;
+                    ps2.connected = false;
+                    if (ps2.dc) { try { ps2.dc.close(); } catch (_) {} ps2.dc = null; }
+                    try { pc.close(); } catch (_) {}
+                    updateTransportUI();
                 }
                 APP.state._pcRestartTimers.delete(timerKey);
             }, 8000));
         } else if (pc.connectionState === 'failed') {
-            APP.showStatusMsg(`連線中斷 (${targetPeerId})`);
+            APP.showStatusMsg(`連線中斷 (${targetPeerId})，改用 Relay 模式`);
             if (APP.state.peers.get(targetPeerId)) {
-                removePeer(targetPeerId);
+                // Don't remove — mark as relay-only so broadcastToPeers still works
+                const ps = APP.state.peers.get(targetPeerId);
+                ps.relay = true;
+                ps.connected = false;
+                if (ps.dc) { try { ps.dc.close(); } catch (_) {} ps.dc = null; }
+                try { pc.close(); } catch (_) {}
             }
         }
     };
