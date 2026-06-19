@@ -1047,6 +1047,18 @@ footer input[type="text"] {
                 <li>🔄 手動同步 — 狀態指示器 + 同步按鈕</li>
                 <li>📱 自適應佈局 — 視窗縮小時排版自動折疊</li>
             </ul>
+            <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;color:#f59e0b;">🔒 資訊安全提醒</h3>
+            <div style="background:#451a03;border:1px solid #991b1b;border-radius:8px;padding:12px 16px;font-size:14px;color:#fdba74;line-height:1.7;margin-bottom:16px;">
+                <p><strong>⚠️ 本應用僅供內網使用，請注意以下事項：</strong></p>
+                <ul style="padding-left:16px;margin-top:8px;">
+                    <li>所有 P2P 訊息經 DTLS 加密，但 <strong>不建議</strong> 在不受信任的網路上傳輸敏感資料</li>
+                    <li>信令伺服器本身以明文 WebSocket 運行（<code>ws://</code>），配對及 Relay 過程無加密</li>
+                    <li>擁有配對代碼的任何用戶均可加入房間並存取所有資料（公告欄、檢查清單、檔案）</li>
+                    <li>檔案傳輸透過 P2P DataChannel 或 WS Relay 進行，無端對端加密驗證</li>
+                    <li>聊天訊息會備份至伺服器（留存天數可調），請勿傳送機密對話</li>
+                    <li>建議在公司內部可信任網路中使用，若需跨網際網路請自行配置 WSS/TLS</li>
+                </ul>
+            </div>
             <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;">⚠️ 已知限制</h3>
             <ul style="color:#94a3b8;font-size:16px;line-height:1.8;padding-left:20px;">
                 <li>需要 Python 3.8+ 執行信令伺服器（可 Docker 化或打包為二進位檔）</li>
