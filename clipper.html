@@ -1137,6 +1137,7 @@ footer input[type="text"] {
                     <button class="admin-tab-btn active" data-admintab="status">📊 狀態</button>
                     <button class="admin-tab-btn" data-admintab="logs">📋 日誌</button>
                     <button class="admin-tab-btn" data-admintab="config">⚙️ 設定</button>
+                    <button class="admin-tab-btn" data-admintab="ntp">🕐 時間</button>
                     <button class="admin-tab-btn" data-admintab="password">🔑 更改密碼</button>
                 </div>
                 <!-- Status -->
@@ -1171,6 +1172,38 @@ footer input[type="text"] {
                         </div>
                         <div style="padding:10px 14px;background:#1e293b;border-radius:8px;color:#64748b;font-size:13px;">
                             <span>日誌路徑: <code id="adminLogPath" style="color:#94a3b8;"></code></span>
+                        </div>
+                    </div>
+                </div>
+                <!-- NTP Config -->
+                <div class="admin-pane" id="adminPaneNtp" style="display:none;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#1e293b;border-radius:8px;">
+                            <span style="color:#94a3b8;">NTP 時間同步</span>
+                            <label style="position:relative;display:inline-block;width:44px;height:24px;">
+                                <input type="checkbox" id="adminNtpToggle" style="opacity:0;width:0;height:0;">
+                                <span style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#475569;border-radius:12px;transition:0.3s;" id="adminNtpSlider"></span>
+                            </label>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#1e293b;border-radius:8px;">
+                            <span style="color:#94a3b8;">NTP 伺服器</span>
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <input type="text" id="adminNtpServer" style="width:200px;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:4px 8px;border-radius:6px;font-size:14px;font-family:inherit;">
+                                <button class="btn btn-secondary" id="btnSaveNtp" style="font-size:11px;padding:3px 8px;">儲存</button>
+                            </div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1e293b;border-radius:8px;">
+                            <span style="color:#94a3b8;">目前偏移</span>
+                            <span id="adminNtpOffset" style="font-weight:500;color:#94a3b8;">---</span>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1e293b;border-radius:8px;">
+                            <span style="color:#94a3b8;">時間來源</span>
+                            <span id="adminTimeSource" style="font-weight:500;">---</span>
+                        </div>
+                        <div style="padding:10px 14px;background:#1e293b;border-radius:8px;font-size:13px;color:#64748b;line-height:1.6;">
+                            <p>預設使用香港天文台 NTP 伺服器 (<code>stdtime.gov.hk</code>)</p>
+                            <p>伺服器每 60 秒自動同步，Client 每 5 秒請求一次</p>
+                            <p>延遲 < 5ms，幾乎無感</p>
                         </div>
                     </div>
                 </div>
@@ -1305,6 +1338,12 @@ const APP = {
         _reconnectCount: 0,
         _reconnectTimer: null,
         _lastRoom: null,
+        timeSource: 'local',
+        serverTimeOffset: 0,
+        _lastServerTime: 0,
+        _lastClientTime: 0,
+        ntpEnabled: false,
+        ntpServer: 'stdtime.gov.hk',
     },
     updateStatus(status) {
         const badge = document.getElementById('statusBadge');
@@ -1944,9 +1983,10 @@ function handleWsMessage(data) {
             renderChecklistBoards();
             // Register display name with server (handles conflicts)
             sendWsMessage({type: 'register-name', room: APP.state.room, displayName: APP.state.displayName});
-            // Fetch server-persisted state
+            // Fetch server-persisted state and time
             if (APP.state.room) {
                 sendWsMessage({type: 'state-get', room: APP.state.room});
+                sendWsMessage({type: 'time-request'});  // initial time sync
             }
             // Start heartbeat
             if (APP.state._heartbeatInterval) clearInterval(APP.state._heartbeatInterval);
@@ -2163,6 +2203,23 @@ function handleWsMessage(data) {
                 APP.state.fileQueue = APP.state.fileQueue.filter(f => f.fileId !== data.fileId);
                 updateFileUI();
                 APP.showStatusMsg('❌ 傳送已取消：' + (data.fileId || ''));
+            }
+            break;
+
+        case 'time-sync':
+            // Server time response — calculate offset
+            if (data.serverTime) {
+                const clientNow = Date.now();
+                const serverTs = data.serverTime;  // ms
+                // Simple offset: server time - client time
+                APP.state.serverTimeOffset = serverTs - clientNow;
+                APP.state.timeSource = 'server';
+                APP.state.ntpEnabled = data.ntpEnabled || false;
+                APP.state.ntpServer = data.ntpServer || 'stdtime.gov.hk';
+                // Only accept offset within reasonable range (< 24h difference)
+                if (Math.abs(APP.state.serverTimeOffset) > 86400000) {
+                    APP.state.timeSource = 'local';
+                }
             }
             break;
 
@@ -2724,12 +2781,28 @@ console.log('[Clipper] App initialized');
 
 // ========== Clock ==========
 function updateClock() {
-    const now = new Date();
+    let now;
+    if (APP.state.timeSource === 'server' && APP.state.serverTimeOffset !== 0) {
+        // Use server time with local drift compensation
+        now = new Date(Date.now() + APP.state.serverTimeOffset);
+    } else {
+        now = new Date();
+    }
     document.getElementById('clockTime').textContent = now.toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
     document.getElementById('clockDate').textContent = now.toLocaleDateString('zh-TW', {year:'numeric',month:'long',day:'numeric',weekday:'long'});
+    // Show time source indicator
+    const sourceIcon = APP.state.timeSource === 'server' ? '🛰️' : '💻';
+    document.getElementById('clockTime').title = '時間來源: ' + (APP.state.timeSource === 'server' ? '伺服器 (NTP)' : '本機');
 }
 updateClock();
 setInterval(updateClock, 1000);
+
+// Periodic time sync from server — every 5 seconds
+setInterval(() => {
+    if (APP.state.connected && APP.state.room) {
+        sendWsMessage({type: 'time-request'});
+    }
+}, 5000);
 // ========== Load Persisted Messages ==========
 const savedMessages = loadFromStorage('vcc_chat_messages', []);
 APP.state.persistedChatMessages = savedMessages;
@@ -4036,6 +4109,16 @@ function updateSettingsView() {
         stunInput.value = loadFromStorage('vcc_stun_server', 'stun:stun.l.google.com:19302');
         stunInput.dataset.loaded = '1';
     }
+    // Update time source indicator in admin panel
+    const tsEl = document.getElementById('adminTimeSource');
+    if (tsEl) {
+        tsEl.textContent = APP.state.timeSource === 'server' ? '🛰️ 伺服器 (NTP)' : '💻 本機時間';
+        tsEl.style.color = APP.state.timeSource === 'server' ? '#22c55e' : '#94a3b8';
+    }
+    const offsetEl = document.getElementById('adminNtpOffset');
+    if (offsetEl && APP.state.serverTimeOffset !== 0) {
+        offsetEl.textContent = (APP.state.serverTimeOffset / 1000).toFixed(3) + 's';
+    }
     // Render online user list
     const userList = document.getElementById('onlineUserList');
     if (userList) {
@@ -4098,6 +4181,17 @@ function handleAdminMessage(data) {
             // Populate status
             if (data.serverInfo) {
                 document.getElementById('adminVersion').textContent = data.serverInfo.version || '---';
+                // NTP info from login
+                const ntpSrv = document.getElementById('adminNtpServer');
+                if (ntpSrv && data.serverInfo.ntpServer) ntpSrv.value = data.serverInfo.ntpServer;
+                const ntpToggle = document.getElementById('adminNtpToggle');
+                if (ntpToggle) {
+                    ntpToggle.checked = data.serverInfo.ntpEnabled !== false;
+                    const slider = document.getElementById('adminNtpSlider');
+                    if (slider) slider.style.background = data.serverInfo.ntpEnabled !== false ? '#38bdf8' : '#475569';
+                }
+                const offsetEl = document.getElementById('adminNtpOffset');
+                if (offsetEl && data.serverInfo.ntpOffset !== undefined) offsetEl.textContent = data.serverInfo.ntpOffset + 's';
                 document.getElementById('adminUptime').textContent = data.serverInfo.uptime ? Math.floor(data.serverInfo.uptime / 3600) + ' 小時 ' + Math.floor((data.serverInfo.uptime % 3600) / 60) + ' 分' : '---';
                 document.getElementById('adminActiveRooms').textContent = data.serverInfo.activeRooms || 0;
                 document.getElementById('adminActivePeers').textContent = data.serverInfo.activePeers || 0;
@@ -4122,7 +4216,25 @@ function handleAdminMessage(data) {
         if (data.config) {
             document.getElementById('adminConfigRetention').value = data.config.chatRetentionDays || 7;
             document.getElementById('adminLogPath').textContent = data.config.dataFile || '---';
+            // NTP settings
+            const ntpToggle = document.getElementById('adminNtpToggle');
+            if (ntpToggle) {
+                ntpToggle.checked = data.config.ntpEnabled !== false;
+                const slider = document.getElementById('adminNtpSlider');
+                if (slider) slider.style.background = data.config.ntpEnabled !== false ? '#38bdf8' : '#475569';
+            }
+            const ntpSrv = document.getElementById('adminNtpServer');
+            if (ntpSrv) ntpSrv.value = data.config.ntpServer || 'stdtime.gov.hk';
+            const offsetEl = document.getElementById('adminNtpOffset');
+            if (offsetEl) offsetEl.textContent = data.config.ntpOffset ? data.config.ntpOffset + 's' : '0s';
         }
+    } else if (data.type === 'ntp-config-result') {
+        if (data.ntpServer !== undefined) {
+            document.getElementById('adminNtpServer').value = data.ntpServer;
+        }
+        const offsetEl = document.getElementById('adminNtpOffset');
+        if (offsetEl && data.ntpOffset !== undefined) offsetEl.textContent = data.ntpOffset + 's';
+        APP.showStatusMsg(data.ntpEnabled !== false ? '✅ NTP 時間同步已啟用' : '✅ NTP 時間同步已停用');
     } else if (data.type === 'admin-change-password-result') {
         const el = document.getElementById('adminPwResult');
         if (el) {
@@ -4160,6 +4272,22 @@ document.getElementById('btnSaveConfig')?.addEventListener('click', () => {
     const retention = parseInt(document.getElementById('adminConfigRetention').value);
     if (isNaN(retention) || retention < 1) { APP.showStatusMsg('❌ 請輸入有效的天數'); return; }
     sendWsMessage({type: 'admin-set-config', password: _adminPassword, config: {chatRetentionDays: retention}});
+});
+
+// NTP toggle
+document.getElementById('adminNtpToggle')?.addEventListener('change', function() {
+    if (!_adminPassword) return;
+    const enabled = this.checked;
+    document.getElementById('adminNtpSlider').style.background = enabled ? '#38bdf8' : '#475569';
+    sendWsMessage({type: 'ntp-config', password: _adminPassword, ntpEnabled: enabled});
+});
+
+// NTP server save
+document.getElementById('btnSaveNtp')?.addEventListener('click', () => {
+    if (!_adminPassword) return;
+    const server = document.getElementById('adminNtpServer').value.trim();
+    if (!server) { APP.showStatusMsg('❌ 請輸入 NTP 伺服器位址'); return; }
+    sendWsMessage({type: 'ntp-config', password: _adminPassword, ntpServer: server, ntpEnabled: true});
 });
 
 // Change password

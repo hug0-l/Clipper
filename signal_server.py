@@ -8,7 +8,9 @@ import logging
 import os
 import random
 import signal
+import socket
 import sqlite3
+import struct
 import string
 import time
 from datetime import datetime, timezone, timedelta
@@ -31,6 +33,7 @@ LOG_RETENTION_HOURS = 24
 DEFAULT_ADMIN_PASSWORD = "12345"
 DEBUG = True   # Toggle verbose debug output
 _config = {"chatRetentionDays": CHAT_RETENTION_DAYS}  # mutable config for runtime changes
+_ntp_config = {"server": "stdtime.gov.hk", "offset": 0.0, "enabled": True}
 
 
 def _setup_logging():
@@ -192,6 +195,36 @@ def _migrate_room_data():
                 }]
         if "checklists" not in room_data[rid]:
             room_data[rid]["checklists"] = []
+
+
+NTP_PORT = 123
+NTP_PACKET = b'\x1b' + 47 * b'\x00'  # NTP v4, client mode
+
+def _ntp_query(server=None):
+    """Query NTP server and return offset in seconds. Returns 0 on failure."""
+    if server is None:
+        server = _ntp_config["server"]
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(5)
+        t0 = time.time()
+        sock.sendto(NTP_PACKET, (server, NTP_PORT))
+        data, addr = sock.recvfrom(1024)
+        t3 = time.time()
+        sock.close()
+        if len(data) < 48:
+            return 0
+        # Extract transmit timestamp (bytes 40-47)
+        tx_ts = struct.unpack('!I', data[40:44])[0]
+        tx_frac = struct.unpack('!I', data[44:48])[0]
+        tx_time = tx_ts + tx_frac / 2**32 - 2208988800  # NTP epoch to Unix
+        # Calculate offset: ((t1 - t0) + (t2 - t3)) / 2  simplified
+        rtt = t3 - t0
+        offset = (tx_time - t0 - rtt / 2)
+        return offset
+    except Exception as e:
+        _debug(f"NTP query failed: {e}")
+        return 0
 
 
 def _ensure_room_data(rid):
@@ -687,6 +720,43 @@ async def handler(websocket):
                     except:
                         pass
 
+            elif msg_type == "time-request":
+                # Client requests current server time
+                ntp_on = _ntp_config["enabled"]
+                if ntp_on:
+                    server_ts = (time.time() + _ntp_config["offset"]) * 1000
+                else:
+                    server_ts = time.time() * 1000
+                try:
+                    await websocket.send(json.dumps({
+                        "type": "time-sync",
+                        "serverTime": server_ts,
+                        "ntpEnabled": ntp_on,
+                        "ntpServer": _ntp_config["server"],
+                    }))
+                except:
+                    pass
+
+            elif msg_type == "ntp-config":
+                if not _verify_admin_password(data.get("password", "")):
+                    await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
+                    continue
+                if "ntpServer" in data:
+                    _ntp_config["server"] = data["ntpServer"]
+                if "ntpEnabled" in data:
+                    _ntp_config["enabled"] = bool(data["ntpEnabled"])
+                if _ntp_config["enabled"]:
+                    _ntp_config["offset"] = _ntp_query()
+                    _log('NTP', 'NTP sync from ' + _ntp_config["server"] + ': offset=' + str(_ntp_config["offset"]))
+                else:
+                    _ntp_config["offset"] = 0
+                await websocket.send(json.dumps({
+                    "type": "ntp-config-result",
+                    "ntpServer": _ntp_config["server"],
+                    "ntpEnabled": _ntp_config["enabled"],
+                    "ntpOffset": round(_ntp_config["offset"], 3),
+                }))
+
             elif msg_type == "register-name":
                 rid = data.get("room")
                 name = data.get("displayName", "").strip()
@@ -767,6 +837,9 @@ async def handler(websocket):
                             "dataRooms": len(room_data),
                             "chatRetentionDays": CHAT_RETENTION_DAYS,
                             "debugMode": DEBUG,
+                            "ntpServer": _ntp_config["server"],
+                            "ntpEnabled": _ntp_config["enabled"],
+                            "ntpOffset": round(_ntp_config["offset"], 3),
                         }
                     }))
                     _log('ADMIN', f'{my_peer_id} logged in successfully')
@@ -807,6 +880,9 @@ async def handler(websocket):
                         "debug": DEBUG,
                         "logRetentionHours": LOG_RETENTION_HOURS,
                         "dataFile": DB_PATH,
+                        "ntpServer": _ntp_config["server"],
+                        "ntpEnabled": _ntp_config["enabled"],
+                        "ntpOffset": round(_ntp_config["offset"], 3),
                     }
                 }))
 
@@ -936,6 +1012,17 @@ async def _periodic_log_rotation():
         _rotate_logs()
 
 
+async def _ntp_sync_loop():
+    """Periodically sync NTP every 60 seconds."""
+    while True:
+        await asyncio.sleep(60)
+        if _ntp_config["enabled"]:
+            offset = _ntp_query()
+            if offset != 0:
+                _ntp_config["offset"] = offset
+                _debug('NTP re-sync: offset=%.3fs' % _ntp_config['offset'])
+
+
 async def main():
     global _start_time
     _start_time = time.time()
@@ -948,6 +1035,12 @@ async def main():
     _migrate_room_data()
     asyncio.create_task(_heartbeat_check())
     asyncio.create_task(_periodic_log_rotation())
+    asyncio.create_task(_ntp_sync_loop())
+    # Initial NTP sync
+    if _ntp_config["enabled"]:
+        _ntp_config["offset"] = _ntp_query()
+        if _ntp_config["offset"] != 0:
+            _log('NTP', 'Initial NTP sync from ' + _ntp_config["server"] + ': offset=' + str(_ntp_config["offset"]))
     total_notices = sum(len(r.get("noticePosts", [])) for r in room_data.values())
     total_boards = sum(len(r.get("checklists", [])) for r in room_data.values())
     total_chats = sum(len(r.get("chatMessages", [])) for r in room_data.values())
