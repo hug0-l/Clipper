@@ -1933,8 +1933,9 @@ document.getElementById('btnJoinPair').addEventListener('click', joinRoom);
 document.getElementById('btnDisconnect').addEventListener('click', disconnect);
 
 // --- Initial state ---
-APP.state.displayName = generateName();
+APP.state.displayName = loadFromStorage('vcc_display_name', '') || generateName();
 document.getElementById('displayNameSpan').textContent = APP.state.displayName;
+saveToStorage('vcc_display_name', APP.state.displayName);
 APP.updateStatus('disconnected');
 APP.showPairingUI(true);
 APP.showStatusMsg('');
@@ -1956,6 +1957,7 @@ document.getElementById('displayNameSpan').addEventListener('click', function() 
     function commit(val) {
         if (val && val.trim()) {
             APP.state.displayName = val.trim();
+            saveToStorage('vcc_display_name', APP.state.displayName);
             const span = document.getElementById('displayNameSpan');
             span.textContent = APP.state.displayName;
             span.style.display = '';
