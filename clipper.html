@@ -2437,13 +2437,14 @@ function startWebRTCPeer(targetPeerId, isInitiator, remoteOffer) {
     };
 
     // --- Connection state ---
+    // Separate reconnect state tracking
+    if (!APP.state._pcRestartTimers) APP.state._pcRestartTimers = new Map();
+
     pc.oniceconnectionstatechange = () => {
         console.log(`[PC:${targetPeerId}] iceConnectionState:`, pc.iceConnectionState);
-        if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-            APP.showStatusMsg(`ICE 連線中斷 (${targetPeerId})`);
-            if (APP.state.peers.get(targetPeerId)?.connected) {
-                removePeer(targetPeerId);
-            }
+        // 'disconnected' is often transient in ICE — wait for connectionState instead
+        if (pc.iceConnectionState === 'failed') {
+            APP.showStatusMsg(`ICE 連線失敗 (${targetPeerId})`);
         }
     };
 
@@ -2451,15 +2452,37 @@ function startWebRTCPeer(targetPeerId, isInitiator, remoteOffer) {
         console.log(`[PC:${targetPeerId}] connectionState:`, pc.connectionState);
         const peerState = APP.state.peers.get(targetPeerId);
         if (pc.connectionState === 'connected') {
+            // Clear any pending restart timer
+            const timerKey = 'restart_' + targetPeerId;
+            if (APP.state._pcRestartTimers && APP.state._pcRestartTimers.has(timerKey)) {
+                clearTimeout(APP.state._pcRestartTimers.get(timerKey));
+                APP.state._pcRestartTimers.delete(timerKey);
+            }
             if (peerState) peerState.connected = true;
             const connectedCount = getConnectedCount();
             APP.updateStatus('connected');
             APP.showStatusMsg(`WebRTC 已連線 — ${connectedCount} 位成員`);
             APP.showPairingUI(false);
             APP.updatePeerCount();
-        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        } else if (pc.connectionState === 'disconnected') {
+            // Don't immediately remove — ICE may recover. Try restart after 5s.
+            APP.showStatusMsg(`⚠ 連線暫時中斷 (${targetPeerId})，正在嘗試恢復...`);
+            const timerKey = 'restart_' + targetPeerId;
+            if (!APP.state._pcRestartTimers) APP.state._pcRestartTimers = new Map();
+            // Clear existing timer if any
+            if (APP.state._pcRestartTimers.has(timerKey)) {
+                clearTimeout(APP.state._pcRestartTimers.get(timerKey));
+            }
+            // Set a grace period before removing
+            APP.state._pcRestartTimers.set(timerKey, setTimeout(() => {
+                if (APP.state.peers.has(targetPeerId) && pc.connectionState !== 'connected') {
+                    removePeer(targetPeerId);
+                }
+                APP.state._pcRestartTimers.delete(timerKey);
+            }, 8000));
+        } else if (pc.connectionState === 'failed') {
             APP.showStatusMsg(`連線中斷 (${targetPeerId})`);
-            if (APP.state.peers.get(targetPeerId)?.connected || pc.connectionState === 'failed') {
+            if (APP.state.peers.get(targetPeerId)) {
                 removePeer(targetPeerId);
             }
         }
