@@ -1131,6 +1131,7 @@ const APP = {
         pendingSync: false,
         _reconnectCount: 0,
         _reconnectTimer: null,
+        _lastRoom: null,
     },
     updateStatus(status) {
         const badge = document.getElementById('statusBadge');
@@ -1648,8 +1649,9 @@ function autoReconnect() {
             APP.state._reconnectCount = 0;
             APP.state._reconnectTimer = null;
             document.getElementById('errorToast').className = '';
-            if (APP.state.room) {
-                sendWsMessage({type: 'join', room: APP.state.room});
+            const roomToJoin = APP.state._lastRoom || APP.state.room;
+            if (roomToJoin) {
+                sendWsMessage({type: 'join', room: roomToJoin});
             } else {
                 sendWsMessage({type: 'generate'});
             }
@@ -1678,7 +1680,9 @@ function connectWebSocket(url) {
             console.log('[WS] Closed');
             if (APP.state.ws === ws) {
                 APP.state.ws = null;
-                if (APP.state.room) {
+                const hadRoom = APP.state.room;
+                if (hadRoom) {
+                    APP.state._lastRoom = hadRoom;
                     cleanupConnection();
                     if (!APP.state.intentionalDisconnect) {
                         APP.showError(`⚠ 信令伺服器離線 — ${APP.state._reconnectCount || 0 > 0 ? `第 ${APP.state._reconnectCount} 次重連中...` : '即將自動重連'}`, false);
