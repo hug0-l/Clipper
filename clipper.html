@@ -4204,10 +4204,17 @@ async function sendFileToPeer(entry, pid) {
         const CHUNK_SIZE = 16384;
         const totalChunks = Math.ceil(buffer.byteLength / CHUNK_SIZE);
         const relayFileId = entry.fileId + '-' + pid;
-        // Compute SHA-256 checksum for integrity verification
-        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-        const checksum = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-        const metaMsg = JSON.stringify({type: 'file-meta', fileId: relayFileId, name: entry.name, size: entry.size, chunks: totalChunks, sha256: checksum});
+        // Compute SHA-256 checksum for integrity verification (skip if crypto.subtle unavailable)
+        let checksum = null;
+        if (crypto.subtle) {
+            try {
+                const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+                checksum = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+            } catch (_) {}
+        }
+        const metaObj = {type: 'file-meta', fileId: relayFileId, name: entry.name, size: entry.size, chunks: totalChunks};
+        if (checksum) metaObj.sha256 = checksum;
+        const metaMsg = JSON.stringify(metaObj);
         sendToPeers(metaMsg, new Set([pid]));
 
         const peerState = APP.state.peers.get(pid);
@@ -4322,8 +4329,8 @@ function handleFileDone(msg, fromPeerId) {
     const blob = new Blob(entry.blobs, {type: 'application/octet-stream'});
     const url = URL.createObjectURL(blob);
 
-    // Verify SHA-256 checksum if sender provided one
-    if (entry.sha256) {
+    // Verify SHA-256 checksum if sender provided one and crypto.subtle available
+    if (entry.sha256 && crypto.subtle) {
         const reader = new FileReader();
         reader.onload = async function() {
             const buf = reader.result;
