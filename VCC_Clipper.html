@@ -821,7 +821,7 @@ footer input[type="text"] {
     <div class="pairing-controls" id="pairingControls">
         <button class="btn btn-primary" id="btnCreatePair">建立配對</button>
         <div class="pairing-code">
-            <input type="text" id="pairingCode" placeholder="配對代碼">
+            <input type="text" id="pairingCode" placeholder="配對代碼" value="1234">
             <button class="btn btn-secondary" id="btnJoinPair">加入配對</button>
         </div>
     </div>
@@ -1865,6 +1865,9 @@ document.getElementById('displayNameSpan').textContent = APP.state.displayName;
 APP.updateStatus('disconnected');
 APP.showPairingUI(true);
 APP.showStatusMsg('');
+
+// --- Auto-connect with default code ---
+setTimeout(() => joinRoom(), 300);
 
 // --- Display name editing ---
 document.getElementById('displayNameSpan').addEventListener('click', function() {
