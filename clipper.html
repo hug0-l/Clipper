@@ -4173,7 +4173,9 @@ document.getElementById('btnSaveStun')?.addEventListener('click', () => {
 
 // ========== Admin Panel ==========
 let _adminPassword = '';
+let _adminToken = '';
 let _adminLoggedIn = false;
+let _adminLogoutTimer = null;
 
 // Admin tab switching
 document.querySelectorAll('.admin-tab-btn').forEach(btn => {
@@ -4190,7 +4192,17 @@ function handleAdminMessage(data) {
     if (data.type === 'admin-login-result') {
         if (data.success) {
             _adminPassword = document.getElementById('adminPw').value;
+            _adminToken = data.token || '';
             _adminLoggedIn = true;
+            // Auto-logout after 30 minutes
+            if (_adminLogoutTimer) clearTimeout(_adminLogoutTimer);
+            _adminLogoutTimer = setTimeout(() => {
+                _adminLoggedIn = false;
+                _adminToken = '';
+                document.getElementById('adminLogin').style.display = '';
+                document.getElementById('adminPanel').style.display = 'none';
+                APP.showStatusMsg('🔐 管理員會話已過期，請重新登入');
+            }, 1800000);
             document.getElementById('adminLogin').style.display = 'none';
             document.getElementById('adminPanel').style.display = 'block';
             document.getElementById('adminLoginError').style.display = 'none';
@@ -4216,8 +4228,8 @@ function handleAdminMessage(data) {
                 document.getElementById('adminDebug').textContent = data.serverInfo.debugMode ? '🟢 ON' : '🔴 OFF';
             }
             // Refresh logs automatically
-            sendWsMessage({type: 'admin-logs', password: _adminPassword, count: 50});
-            sendWsMessage({type: 'admin-get-config', password: _adminPassword});
+            sendWsMessage({type: 'admin-logs', token: _adminToken, count: 50});
+            sendWsMessage({type: 'admin-get-config', token: _adminToken});
         } else {
             document.getElementById('adminLoginError').textContent = data.message || '❌ 登入失敗';
             document.getElementById('adminLoginError').style.display = 'block';
@@ -4294,6 +4306,12 @@ function handleAdminMessage(data) {
             setTimeout(() => URL.revokeObjectURL(url), 10000);
             APP.showStatusMsg('✅ 設定備份已下載');
         }
+    } else if (data.type === 'error' && data.message === 'unauthorized') {
+        _adminLoggedIn = false;
+        _adminToken = '';
+        document.getElementById('adminLogin').style.display = '';
+        document.getElementById('adminPanel').style.display = 'none';
+        APP.showStatusMsg('🔐 管理員會話已過期，請重新登入');
     } else if (data.type === 'admin-import-result') {
         const el = document.getElementById('importResult');
         if (el) {
@@ -4317,10 +4335,10 @@ document.getElementById('adminPw')?.addEventListener('keydown', function(e) { if
 
 // Refresh logs
 document.getElementById('btnRefreshLogs')?.addEventListener('click', () => {
-    if (_adminPassword) sendWsMessage({type: 'admin-logs', password: _adminPassword, count: 50});
+    if (_adminPassword) sendWsMessage({type: 'admin-logs', token: _adminToken, count: 50});
 });
 document.getElementById('btnDownloadLog')?.addEventListener('click', () => {
-    if (_adminPassword) sendWsMessage({type: 'admin-log-download', password: _adminPassword});
+    if (_adminPassword) sendWsMessage({type: 'admin-log-download', token: _adminToken});
 });
 
 // Save config
@@ -4328,7 +4346,7 @@ document.getElementById('btnSaveConfig')?.addEventListener('click', () => {
     if (!_adminPassword) return;
     const retention = parseInt(document.getElementById('adminConfigRetention').value);
     if (isNaN(retention) || retention < 1) { APP.showStatusMsg('❌ 請輸入有效的天數'); return; }
-    sendWsMessage({type: 'admin-set-config', password: _adminPassword, config: {chatRetentionDays: retention}});
+    sendWsMessage({type: 'admin-set-config', token: _adminToken, config: {chatRetentionDays: retention}});
 });
 
 // NTP toggle
@@ -4336,7 +4354,7 @@ document.getElementById('adminNtpToggle')?.addEventListener('change', function()
     if (!_adminPassword) return;
     const enabled = this.checked;
     document.getElementById('adminNtpSlider').style.background = enabled ? '#38bdf8' : '#475569';
-    sendWsMessage({type: 'ntp-config', password: _adminPassword, ntpEnabled: enabled});
+    sendWsMessage({type: 'ntp-config', token: _adminToken, ntpEnabled: enabled});
 });
 
 // NTP server save
@@ -4344,13 +4362,13 @@ document.getElementById('btnSaveNtp')?.addEventListener('click', () => {
     if (!_adminPassword) return;
     const server = document.getElementById('adminNtpServer').value.trim();
     if (!server) { APP.showStatusMsg('❌ 請輸入 NTP 伺服器位址'); return; }
-    sendWsMessage({type: 'ntp-config', password: _adminPassword, ntpServer: server, ntpEnabled: true});
+    sendWsMessage({type: 'ntp-config', token: _adminToken, ntpServer: server, ntpEnabled: true});
 });
 
 // Export/Import dump
 document.getElementById('btnExportDump')?.addEventListener('click', () => {
     if (!_adminPassword) return;
-    sendWsMessage({type: 'admin-export', password: _adminPassword});
+    sendWsMessage({type: 'admin-export', token: _adminToken});
 });
 document.getElementById('fileImportDump')?.addEventListener('change', function() {
     if (!_adminPassword) return;
@@ -4358,7 +4376,7 @@ document.getElementById('fileImportDump')?.addEventListener('change', function()
     if (!file) return;
     const reader = new FileReader();
     reader.onload = function(e) {
-        sendWsMessage({type: 'admin-import', password: _adminPassword, dump: e.target.result});
+        sendWsMessage({type: 'admin-import', token: _adminToken, dump: e.target.result});
     };
     reader.readAsText(file);
     this.value = '';

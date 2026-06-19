@@ -1062,6 +1062,27 @@ async def _periodic_log_rotation():
         _rotate_logs()
 
 
+async def _session_cleanup():
+    """Clean up expired sessions every 5 minutes."""
+    while True:
+        await asyncio.sleep(300)
+        now = time.time()
+        expired = [t for t, e in _sessions.items() if now - e["createdAt"] > SESSION_TIMEOUT]
+        for t in expired:
+            _sessions.pop(t, None)
+        if expired and DEBUG:
+            _debug(f"Cleaned up {len(expired)} expired sessions")
+
+async def _login_attempt_cleanup():
+    """Clean up old login attempt records every 60 seconds."""
+    while True:
+        await asyncio.sleep(60)
+        now = time.time()
+        stale = [k for k, v in _login_attempts.items() if now - v["first"] > LOGIN_COOLDOWN]
+        for k in stale:
+            _login_attempts.pop(k, None)
+
+
 async def _ntp_sync_loop():
     """Periodically sync NTP every 60 seconds."""
     while True:
@@ -1085,6 +1106,8 @@ async def main():
     _migrate_room_data()
     asyncio.create_task(_heartbeat_check())
     asyncio.create_task(_periodic_log_rotation())
+    asyncio.create_task(_session_cleanup())
+    asyncio.create_task(_login_attempt_cleanup())
     asyncio.create_task(_ntp_sync_loop())
     # Initial NTP sync
     if _ntp_config["enabled"]:
