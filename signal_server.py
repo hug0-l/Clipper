@@ -396,7 +396,7 @@ async def handler(websocket):
                 other_peers = {pid: info for pid, info in rooms[room_id].items() if pid != my_peer_id}
                 if other_peers:
                     peers_list = [
-                        {"peerId": pid, "joinedAt": info["joinedAt"]}
+                        {"peerId": pid, "joinedAt": info["joinedAt"], "displayName": info.get("displayName", pid)}
                         for pid, info in other_peers.items()
                     ]
                     await websocket.send(json.dumps({
