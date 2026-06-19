@@ -431,9 +431,34 @@ footer input[type="text"] {
     border-radius: 10px;
     padding: 16px;
     margin-bottom: 0;
+    position: relative;
+    border-left: 4px solid #334155;
 }
 .notice-card.pinned {
-    border-left: 3px solid #fbbf24;
+    border-left-width: 4px;
+}
+.notice-card .category-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    color: #fff;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+.notice-card .tag-badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #334155;
+    color: #94a3b8;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+.notice-card .tag-badge + .tag-badge {
+    margin-left: 4px;
 }
 .notice-card-header {
     display: flex;
@@ -849,6 +874,18 @@ APP.registerSyncConsumer = function(fn) {
 };
 
 // ========== Notice Board ==========
+const NOTICE_CATEGORIES = [
+  { value: '',         label: '無分類', color: '#64748b' },
+  { value: '重要',     label: '重要',   color: '#ef4444' },
+  { value: '日常',     label: '日常',   color: '#38bdf8' },
+  { value: '交接事項', label: '交接事項', color: '#f59e0b' },
+  { value: '其他事項', label: '其他事項', color: '#64748b' },
+];
+function getCategoryColor(cat) {
+  const found = NOTICE_CATEGORIES.find(c => c.value === cat);
+  return found ? found.color : '#64748b';
+}
+
 function mergeNoticePosts(incoming) {
     const existing = APP.state.noticePosts;
     for (const post of incoming) {
@@ -878,12 +915,17 @@ function renderNoticeBoard() {
     list.innerHTML = sorted.map(post => {
         const timeStr = new Date(post.timestamp).toLocaleString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
         const editedStr = post.editedAt ? ' (已編輯)' : '';
-        return '<div class="notice-card' + (post.pinned ? ' pinned' : '') + '">'
+        const catColor = getCategoryColor(post.category || '');
+        const catLabel = NOTICE_CATEGORIES.find(c => c.value === (post.category || ''))?.label || '';
+        const categoryBadge = catLabel ? '<span class="category-badge" style="background:' + catColor + '">' + escapeHtml(catLabel) + '</span>' : '';
+        const tagsHtml = (post.tags && post.tags.length) ? post.tags.map(t => '<span class="tag-badge">' + escapeHtml(t) + '</span>').join('') : '';
+        return '<div class="notice-card' + (post.pinned ? ' pinned' : '') + '" style="border-left-color:' + catColor + '">'
             + '<div class="notice-card-header">'
-            + '<div class="notice-card-title">' + escapeHtml(post.title) + '</div>'
+            + '<div class="notice-card-title">' + categoryBadge + escapeHtml(post.title) + '</div>'
             + (post.pinned ? '<span class="pin-badge">📌</span>' : '')
             + '</div>'
             + '<div class="notice-card-meta">' + escapeHtml(post.author) + ' · ' + timeStr + editedStr + '</div>'
+            + '<div class="notice-card-meta">' + tagsHtml + '</div>'
             + '<div class="notice-card-content">' + escapeHtml(post.content) + '</div>'
             + '<div class="notice-card-actions">'
             + '<button class="btn-icon" data-action="edit" data-id="' + post.id + '">✏️</button>'
@@ -917,9 +959,15 @@ function showNoticeForm(post) {
     const overlay = document.createElement('div');
     overlay.className = 'notice-post-form';
     const isEdit = !!post;
+    const catOptions = NOTICE_CATEGORIES.map(c =>
+        '<option value="' + c.value + '"' + ((isEdit && post.category === c.value) ? ' selected' : '') + '>' + c.label + '</option>'
+    ).join('');
+    const tagsVal = (isEdit && post.tags) ? post.tags.join(',') : '';
     overlay.innerHTML = '<div class="notice-form-box">'
         + '<h3>' + (isEdit ? '✏️ 編輯公告' : '✏️ 新增公告') + '</h3>'
         + '<input type="text" class="notice-form-input" id="noticeFormTitle" placeholder="公告標題" value="' + (isEdit ? escapeHtml(post.title) : '') + '">'
+        + '<select class="notice-form-input" id="noticeFormCategory">' + catOptions + '</select>'
+        + '<input type="text" class="notice-form-input" id="noticeFormTags" placeholder="標籤，逗號分隔" value="' + escapeHtml(tagsVal) + '">'
         + '<textarea class="notice-form-input notice-form-textarea" id="noticeFormContent" placeholder="公告內容...">' + (isEdit ? escapeHtml(post.content) : '') + '</textarea>'
         + '<div class="notice-form-buttons">'
         + '<button class="btn btn-secondary" id="noticeFormCancel">取消</button>'
@@ -928,6 +976,8 @@ function showNoticeForm(post) {
     document.body.appendChild(overlay);
 
     const titleInput = document.getElementById('noticeFormTitle');
+    const categoryInput = document.getElementById('noticeFormCategory');
+    const tagsInput = document.getElementById('noticeFormTags');
     const contentInput = document.getElementById('noticeFormContent');
 
     document.getElementById('noticeFormCancel').addEventListener('click', () => overlay.remove());
@@ -938,10 +988,12 @@ function showNoticeForm(post) {
             APP.showStatusMsg('❌ 標題和內容不能為空');
             return;
         }
+        const category = categoryInput.value;
+        const tagsString = tagsInput.value;
         if (isEdit) {
-            editNoticePost(post.id, title, content);
+            editNoticePost(post.id, title, content, category, tagsString);
         } else {
-            createNoticePost(title, content);
+            createNoticePost(title, content, category, tagsString);
         }
         overlay.remove();
     });
@@ -951,11 +1003,13 @@ function showNoticeForm(post) {
     titleInput.focus();
 }
 
-function createNoticePost(title, content) {
+function createNoticePost(title, content, category, tagsString) {
     if (!APP.state.connected || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
     }
+    const tags = tagsString ? tagsString.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const color = getCategoryColor(category || '');
     const newPost = {
         id: crypto.randomUUID(),
         title: title.trim(),
@@ -963,7 +1017,10 @@ function createNoticePost(title, content) {
         author: APP.state.displayName,
         pinned: false,
         timestamp: Date.now(),
-        editedAt: null
+        editedAt: null,
+        category: category || '',
+        tags: tags,
+        color: color
     };
     APP.state.noticePosts.push(newPost);
     saveToStorage('vcc_notice_posts', APP.state.noticePosts);
@@ -972,20 +1029,31 @@ function createNoticePost(title, content) {
     APP.showStatusMsg('✅ 公告已發布');
 }
 
-function editNoticePost(id, title, content) {
+function editNoticePost(id, title, content, category, tagsString) {
     const post = APP.state.noticePosts.find(p => p.id === id);
     if (!post) return;
+    const tags = tagsString ? tagsString.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const color = getCategoryColor(category || '');
     post.title = title.trim();
     post.content = content.trim();
+    post.category = category || '';
+    post.tags = tags;
+    post.color = color;
     post.editedAt = Date.now();
     saveToStorage('vcc_notice_posts', APP.state.noticePosts);
-    sendWsMessage({type: 'notice-edit', room: APP.state.room, id, title: post.title, content: post.content, editedAt: post.editedAt});
+    sendWsMessage({type: 'notice-edit', room: APP.state.room, id, title: post.title, content: post.content, category: post.category, tags: post.tags, color: post.color, editedAt: post.editedAt});
     renderNoticeBoard();
     APP.showStatusMsg('✅ 公告已更新');
 }
 
 async function deleteNoticePost(id) {
-    if (!await showConfirmDialog('確定刪除此公告？')) return;
+    const post = APP.state.noticePosts.find(p => p.id === id);
+    if (!post) return;
+    let msg = '確定刪除此公告？';
+    if (post.category === '重要') {
+        msg = '⚠️ 此為【重要】公告！' + msg;
+    }
+    if (!await showConfirmDialog(msg)) return;
     APP.state.noticePosts = APP.state.noticePosts.filter(p => p.id !== id);
     saveToStorage('vcc_notice_posts', APP.state.noticePosts);
     sendWsMessage({type: 'notice-delete', room: APP.state.room, id});
@@ -1125,6 +1193,9 @@ function handleWsMessage(data) {
                 editPost.title = data.title;
                 editPost.content = data.content;
                 editPost.editedAt = data.editedAt;
+                if (data.category !== undefined) editPost.category = data.category;
+                if (data.tags !== undefined) editPost.tags = data.tags;
+                if (data.color !== undefined) editPost.color = data.color;
                 saveToStorage('vcc_notice_posts', APP.state.noticePosts);
                 renderNoticeBoard();
             }
