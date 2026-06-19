@@ -1176,6 +1176,10 @@ const APP = {
         }
         btn.style.display = '';
     },
+    // Room-scoped key: data is isolated per room code
+    roomKey(key) {
+        return APP.state.room ? key + '_' + APP.state.room : key;
+    },
     setRoomCode(code) {
         document.getElementById('roomCode').textContent = code || '---';
     },
@@ -1510,7 +1514,7 @@ function createNoticePost(title, content, category, tagsString) {
         color: color
     };
     APP.state.noticePosts.push(newPost);
-    saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+    saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
     sendWsMessage({type: 'notice-create', room: APP.state.room, post: newPost});
     renderNoticeBoard();
     APP.showStatusMsg('✅ 公告已發布');
@@ -1531,7 +1535,7 @@ function editNoticePost(id, title, content, category, tagsString) {
     post.tags = tags;
     post.color = color;
     post.editedAt = Date.now();
-    saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+    saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
     sendWsMessage({type: 'notice-edit', room: APP.state.room, id, title: post.title, content: post.content, category: post.category, tags: post.tags, color: post.color, editedAt: post.editedAt});
     renderNoticeBoard();
     APP.showStatusMsg('✅ 公告已更新');
@@ -1546,7 +1550,7 @@ async function deleteNoticePost(id) {
     }
     if (!await showConfirmDialog(msg)) return;
     APP.state.noticePosts = APP.state.noticePosts.filter(p => p.id !== id);
-    saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+    saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
     sendWsMessage({type: 'notice-delete', room: APP.state.room, id});
     renderNoticeBoard();
     APP.showStatusMsg('✅ 公告已刪除');
@@ -1556,7 +1560,7 @@ function togglePinNoticePost(id) {
     const post = APP.state.noticePosts.find(p => p.id === id);
     if (!post) return;
     post.pinned = !post.pinned;
-    saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+    saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
     sendWsMessage({type: 'notice-pin', room: APP.state.room, id, pinned: post.pinned});
     renderNoticeBoard();
 }
@@ -1682,7 +1686,12 @@ function handleWsMessage(data) {
             APP.state.myPeerId = data.peerId;
             APP.setRoomCode(data.room);
             APP.showStatusMsg(`已加入配對 (我的 ID: ${data.peerId})`);
-            // NEW: fetch server-persisted state
+            // Reload room-scoped data from localStorage
+            APP.state.noticePosts = loadFromStorage(APP.roomKey('vcc_notice_posts'), []);
+            APP.state.checklists = loadFromStorage(APP.roomKey('vcc_checklists'), []);
+            renderNoticeBoard();
+            renderChecklistBoards();
+            // Fetch server-persisted state (will merge with local)
             if (APP.state.room) {
                 sendWsMessage({type: 'state-get', room: APP.state.room});
             }
@@ -1711,8 +1720,8 @@ function handleWsMessage(data) {
                     }
                 }
             }
-            saveToStorage('vcc_notice_posts', APP.state.noticePosts);
-            saveToStorage('vcc_checklists', APP.state.checklists);
+            saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
+            saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
             renderNoticeBoard();
             renderChecklistBoards();
             APP.updateSyncStatus();
@@ -1720,7 +1729,7 @@ function handleWsMessage(data) {
 
         case 'notice-create':
             mergeNoticePosts([data.post]);
-            saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+            saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
             renderNoticeBoard();
             showPopup('📋', '新公告', (data.post && data.post.author ? data.post.author + '：' : '') + (data.post && data.post.title ? data.post.title : ''));
             break;
@@ -1734,7 +1743,7 @@ function handleWsMessage(data) {
                 if (data.category !== undefined) editPost.category = data.category;
                 if (data.tags !== undefined) editPost.tags = data.tags;
                 if (data.color !== undefined) editPost.color = data.color;
-                saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+                saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
                 renderNoticeBoard();
             }
             break;
@@ -1742,7 +1751,7 @@ function handleWsMessage(data) {
 
         case 'notice-delete':
             APP.state.noticePosts = APP.state.noticePosts.filter(p => p.id !== data.id);
-            saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+            saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
             renderNoticeBoard();
             break;
 
@@ -1750,7 +1759,7 @@ function handleWsMessage(data) {
             const pinPost = APP.state.noticePosts.find(p => p.id === data.id);
             if (pinPost) {
                 pinPost.pinned = data.pinned;
-                saveToStorage('vcc_notice_posts', APP.state.noticePosts);
+                saveToStorage(APP.roomKey('vcc_notice_posts'), APP.state.noticePosts);
                 renderNoticeBoard();
             }
             break;
@@ -1760,7 +1769,7 @@ function handleWsMessage(data) {
             // data.board — full board
             if (!APP.state.checklists.some(b => b.id === data.board.id)) {
                 APP.state.checklists.push(data.board);
-                saveToStorage('vcc_checklists', APP.state.checklists);
+                saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                 renderChecklistBoards();
                 showPopup('✅', '新檢查清單', (data.board && data.board.createdBy ? data.board.createdBy + '：' : '') + (data.board && data.board.title ? data.board.title : ''));
             }
@@ -1775,7 +1784,7 @@ function handleWsMessage(data) {
                     if (data.category !== undefined) board.category = data.category;
                     if (data.tags !== undefined) board.tags = data.tags;
                     if (data.color !== undefined) board.color = data.color;
-                    saveToStorage('vcc_checklists', APP.state.checklists);
+                    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                     renderChecklistBoards();
                 }
             }
@@ -1784,7 +1793,7 @@ function handleWsMessage(data) {
         case 'checklistboard-delete':
             // data.id
             APP.state.checklists = APP.state.checklists.filter(b => b.id !== data.id);
-            saveToStorage('vcc_checklists', APP.state.checklists);
+            saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
             renderChecklistBoards();
             break;
 
@@ -1794,7 +1803,7 @@ function handleWsMessage(data) {
                 const pinBoard = APP.state.checklists.find(b => b.id === data.id);
                 if (pinBoard) {
                     pinBoard.pinned = data.pinned;
-                    saveToStorage('vcc_checklists', APP.state.checklists);
+                    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                     renderChecklistBoards();
                 }
             }
@@ -1807,7 +1816,7 @@ function handleWsMessage(data) {
                 if (remBoard) {
                     remBoard.reminderAt = data.reminderAt;
                     remBoard.reminderTitle = data.reminderTitle || '';
-                    saveToStorage('vcc_checklists', APP.state.checklists);
+                    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                     renderChecklistBoards();
                 }
             }
@@ -1819,7 +1828,7 @@ function handleWsMessage(data) {
                 const addBoard = APP.state.checklists.find(b => b.id === data.checklistId);
                 if (addBoard && !addBoard.items.some(i => i.id === data.item.id)) {
                     addBoard.items.push(data.item);
-                    saveToStorage('vcc_checklists', APP.state.checklists);
+                    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                     renderChecklistBoards();
                     showPopup('✅', '新待辦項目', (data.item && data.item.addedBy ? data.item.addedBy + ' 在「' + addBoard.title + '」：' : '') + (data.item && data.item.text ? data.item.text : ''));
                 }
@@ -1835,7 +1844,7 @@ function handleWsMessage(data) {
                     if (tglItem) {
                         tglItem.checked = data.checked;
                         tglItem.checkedAt = data.checkedAt;
-                        saveToStorage('vcc_checklists', APP.state.checklists);
+                        saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                         renderChecklistBoards();
                     }
                 }
@@ -1848,7 +1857,7 @@ function handleWsMessage(data) {
                 const delBoard = APP.state.checklists.find(b => b.id === data.checklistId);
                 if (delBoard) {
                     delBoard.items = delBoard.items.filter(i => i.id !== data.id);
-                    saveToStorage('vcc_checklists', APP.state.checklists);
+                    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                     renderChecklistBoards();
                 }
             }
@@ -1863,7 +1872,7 @@ function handleWsMessage(data) {
                         item.checked = false;
                         item.checkedAt = null;
                     }
-                    saveToStorage('vcc_checklists', APP.state.checklists);
+                    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                     renderChecklistBoards();
                 }
             }
@@ -2667,7 +2676,7 @@ function showChecklistForm(board) {
                 b.category = category;
                 b.tags = tags;
                 b.color = selectedColor;
-                saveToStorage('vcc_checklists', APP.state.checklists);
+                saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                 sendWsMessage({type: 'checklistboard-edit', room: APP.state.room, id: b.id, title, category, tags, color: selectedColor});
                 renderChecklistBoards();
                 APP.showStatusMsg('✅ 檢查清單已更新');
@@ -2689,7 +2698,7 @@ function showChecklistForm(board) {
                 items: []
             };
             APP.state.checklists.push(newBoard);
-            saveToStorage('vcc_checklists', APP.state.checklists);
+            saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
             sendWsMessage({type: 'checklistboard-create', room: APP.state.room, board: newBoard});
             renderChecklistBoards();
             APP.showStatusMsg('✅ 檢查清單已新增');
@@ -2718,7 +2727,7 @@ function addChecklistItem(checklistId, text) {
         checkedAt: null
     };
     board.items.push(newItem);
-    saveToStorage('vcc_checklists', APP.state.checklists);
+    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
     sendWsMessage({type: 'checklist-add', room: APP.state.room, checklistId, item: newItem});
     renderChecklistBoards();
 }
@@ -2730,7 +2739,7 @@ function toggleChecklistItem(checklistId, itemId) {
     if (!item) return;
     item.checked = !item.checked;
     item.checkedAt = item.checked ? Date.now() : null;
-    saveToStorage('vcc_checklists', APP.state.checklists);
+    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
     sendWsMessage({type: 'checklist-toggle', room: APP.state.room, checklistId, id: itemId, checked: item.checked, checkedAt: item.checkedAt});
     renderChecklistBoards();
 }
@@ -2740,7 +2749,7 @@ async function deleteChecklistItem(checklistId, itemId) {
     const board = APP.state.checklists.find(b => b.id === checklistId);
     if (!board) return;
     board.items = board.items.filter(i => i.id !== itemId);
-    saveToStorage('vcc_checklists', APP.state.checklists);
+    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
     sendWsMessage({type: 'checklist-delete', room: APP.state.room, checklistId, id: itemId});
     renderChecklistBoards();
 }
@@ -2749,7 +2758,7 @@ function togglePinChecklist(checklistId) {
     const board = APP.state.checklists.find(b => b.id === checklistId);
     if (!board) return;
     board.pinned = !board.pinned;
-    saveToStorage('vcc_checklists', APP.state.checklists);
+    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
     sendWsMessage({type: 'checklistboard-pin', room: APP.state.room, id: checklistId, pinned: board.pinned});
     renderChecklistBoards();
 }
@@ -2757,7 +2766,7 @@ function togglePinChecklist(checklistId) {
 async function deleteChecklistBoard(checklistId) {
     if (!await showConfirmDialog('確定刪除此檢查清單？（所有項目也將刪除）')) return;
     APP.state.checklists = APP.state.checklists.filter(b => b.id !== checklistId);
-    saveToStorage('vcc_checklists', APP.state.checklists);
+    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
     sendWsMessage({type: 'checklistboard-delete', room: APP.state.room, id: checklistId});
     renderChecklistBoards();
 }
@@ -2771,7 +2780,7 @@ function resetChecklistBoard(checklistId) {
         item.checked = false;
         item.checkedAt = null;
     }
-    saveToStorage('vcc_checklists', APP.state.checklists);
+    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
     sendWsMessage({type: 'checklist-reset', room: APP.state.room, id: checklistId});
     renderChecklistBoards();
     APP.showStatusMsg('🔄 已重設所有勾選');
@@ -2824,7 +2833,7 @@ function setChecklistReminder(checklistId, reminderAt, reminderTitle) {
     if (!board) return;
     board.reminderAt = reminderAt;
     board.reminderTitle = reminderTitle || '';
-    saveToStorage('vcc_checklists', APP.state.checklists);
+    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
     sendWsMessage({type: 'checklistboard-remind', room: APP.state.room, id: checklistId, reminderAt, reminderTitle: board.reminderTitle});
     renderChecklistBoards();
 }
@@ -2839,7 +2848,7 @@ setInterval(() => {
             // Clear the reminder so it doesn't fire again
             board.reminderAt = null;
             board.reminderTitle = '';
-            saveToStorage('vcc_checklists', APP.state.checklists);
+            saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
             // Also tell server to clear it
             if (APP.state.connected && APP.state.room) {
                 sendWsMessage({type: 'checklistboard-remind', room: APP.state.room, id: board.id, reminderAt: null, reminderTitle: ''});
@@ -2850,7 +2859,7 @@ setInterval(() => {
 }, 15000);
 
 // ========== Checklist v2 Init ==========
-APP.state.checklists = loadFromStorage('vcc_checklists', []);
+APP.state.checklists = loadFromStorage(APP.roomKey('vcc_checklists'), []);
 renderChecklistBoards();
 
 document.getElementById('btnNewChecklist').addEventListener('click', () => {
@@ -3371,7 +3380,7 @@ document.getElementById('btnClearChat').addEventListener('click', async () => {
 });
 
 // ========== Notice Board Init ==========
-APP.state.noticePosts = loadFromStorage('vcc_notice_posts', []);
+APP.state.noticePosts = loadFromStorage(APP.roomKey('vcc_notice_posts'), []);
 renderNoticeBoard();
 
 document.getElementById('btnNewPost').addEventListener('click', () => {
