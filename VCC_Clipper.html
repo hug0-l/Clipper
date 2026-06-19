@@ -60,6 +60,23 @@ header h1 {
     font-size: 13px;
     color: #94a3b8;
 }
+.clock-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.2;
+}
+.clock-time {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 20px;
+    font-weight: 600;
+    color: #38bdf8;
+    letter-spacing: 1px;
+}
+.clock-date {
+    font-size: 11px;
+    color: #64748b;
+}
 .room-code span {
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
     color: #38bdf8;
@@ -666,6 +683,11 @@ footer input[type="text"] {
     <h1>VCC Clipper v1.0</h1>
     <span class="status-badge disconnected" id="statusBadge">🔴 未連線</span>
     <span class="peer-count" id="peerCount"></span>    <span class="display-name-span" id="displayNameSpan"></span>
+
+    <div class="clock-display" id="clockDisplay">
+        <span class="clock-time" id="clockTime">00:00:00</span>
+        <span class="clock-date" id="clockDate"></span>
+    </div>
 
     <div class="room-code">代碼: <span id="roomCode">---</span></div>
 </header>
@@ -1838,6 +1860,15 @@ document.getElementById('displayNameSpan').addEventListener('click', function() 
     });
 });
 console.log('[VCC] App initialized');console.log('[VCC] App initialized');
+
+// ========== Clock ==========
+function updateClock() {
+    const now = new Date();
+    document.getElementById('clockTime').textContent = now.toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+    document.getElementById('clockDate').textContent = now.toLocaleDateString('zh-TW', {year:'numeric',month:'long',day:'numeric',weekday:'long'});
+}
+updateClock();
+setInterval(updateClock, 1000);
 // ========== Load Persisted Messages ==========
 const savedMessages = loadFromStorage('vcc_chat_messages', []);
 APP.state.persistedChatMessages = savedMessages;
