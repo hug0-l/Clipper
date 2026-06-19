@@ -4504,9 +4504,18 @@ function nameToHue(str) {
 }
 
 function renderChatMessage(from, text, timestamp, msgId) {
+    // System messages get low-visibility treatment
+    const container = document.getElementById('chatMessages');
+    if (from === '系統') {
+        const div = document.createElement('div');
+        div.style.cssText = 'align-self:center;text-align:center;font-size:11px;color:#475569;padding:2px 0;opacity:0.7;';
+        div.textContent = text;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+        return;
+    }
     // Resolve display name: try peerNames map first, fall back to raw from value
     const displayFrom = APP.state.peerNames.get(from) || from;
-    const container = document.getElementById('chatMessages');
     const isSelf = from === APP.state.displayName;
     const side = isSelf ? 'self' : 'other';
     const timeStr = new Date(timestamp).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -4543,20 +4552,11 @@ function appendSystemMessage(text) {
     if (APP.state.persistedChatMessages.length > 200) {
         APP.state.persistedChatMessages = APP.state.persistedChatMessages.slice(-200);
     }
-    // Render DOM
+    // Render DOM — low-visibility center line, no bubble
     const container = document.getElementById('chatMessages');
-    const timeStr = new Date(timestamp).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
     const div = document.createElement('div');
-    div.className = 'chat-msg other';
-    div.style.alignSelf = 'center';
-    div.style.maxWidth = '100%';
-    div.style.textAlign = 'center';
-    div.style.background = 'transparent';
-    div.style.color = '#94a3b8';
-    div.style.fontSize = '12px';
-    div.innerHTML = '<div class="msg-sender">系統</div>'
-        + '<div class="msg-text">' + escapeHtml(text) + '</div>'
-        + '<div class="msg-time">' + timeStr + '</div>';
+    div.style.cssText = 'align-self:center;text-align:center;font-size:11px;color:#475569;padding:2px 0;opacity:0.7;';
+    div.textContent = text;
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
 }
