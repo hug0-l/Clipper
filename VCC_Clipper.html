@@ -864,28 +864,45 @@ footer input[type="text"] {
         <div style="max-width:500px;margin:0 auto;">
             <h2 style="font-size:25px;font-weight:600;margin-bottom:12px;">關於 VCC Clipper</h2>
             <p style="color:#94a3b8;margin-bottom:20px;line-height:1.7;">
-                VCC Clipper 是一套內網跨子網 P2P 協作工具，透過 WebRTC 建立點對點連線，
+                VCC Clipper 是一套內網跨子網 P2P 多人協作工具，透過 WebRTC 建立點對點連線，
+                搭配 WebSocket 信令伺服器進行配對與持久化資料儲存。支援多達 50 台裝置同時連線。
             </p>
             <table style="color:#94a3b8;font-size:16px;line-height:2;">
-                <tr><td style="padding-right:20px;color:#64748b;">版本</td><td>v1.0.0</td></tr>
+                <tr><td style="padding-right:20px;color:#64748b;">版本</td><td id="aboutVersion">v1.1.0</td></tr>
                 <tr><td style="padding-right:20px;color:#64748b;">作者</td><td>RTHKVCC Team</td></tr>
-                <tr><td style="padding-right:20px;color:#64748b;">技術</td><td>WebRTC · WebSocket · Python</td></tr>
+                <tr><td style="padding-right:20px;color:#64748b;">技術</td><td>WebRTC · WebSocket · Python · WebSockets</td></tr>
                 <tr><td style="padding-right:20px;color:#64748b;">授權</td><td>MIT</td></tr>
+                <tr><td style="padding-right:20px;color:#64748b;">檔案</td><td>VCC_Clipper.html (2,900+ 行) + signal_server.py (630+ 行)</td></tr>
             </table>
-            <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;">功能</h3>
-            <ul style="color:#94a3b8;font-size:16px;line-height:1.8;padding-left:20px;">
-                <li>💬 實時短信 — 即時訊息廣播</li>
-                <li>📁 檔案傳輸 — 拖放上傳，支援大檔案</li>
-
+            <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;">🚀 功能</h3>
+            <ul style="color:#94a3b8;font-size:16px;line-height:2;padding-left:20px;">
+                <li>💬 實時短信 — 即時 P2P 訊息廣播，自動 WS Relay 後備</li>
+                <li>📁 檔案傳輸 — 拖放上傳，支援大檔案區塊傳送，指定對象傳送</li>
+                <li>📋 公告欄 — 分類（重要/日常/交接事項/其他事項）、標籤、色碼、釘選</li>
+                <li>✅ 檢查清單 — 階層式 Board、10 色色盤、標籤、釘選、排程提醒、Tick Reset</li>
+                <li>⚙️ 設定頁 — 檢視傳輸模式（P2P / Relay）及各用戶連線狀態</li>
+                <li>🖥️ 伺服器持久化 — 所有資料儲存於 vcc_server_state.json</li>
+                <li>🔍 Debug Dump — 一鍵輸出伺服器完整診斷</li>
+                <li>👥 Full Mesh 網狀網路 — 最多 50 台同時連線</li>
+                <li>🏷️ 顯示名稱系統 — 隨機中文暱稱，跨 F5 保留</li>
+                <li>🕐 頁頂時鐘 — 即時 hh:mm:ss 及當日日期</li>
+                <li>🔗 預設配對碼 — 開啟頁面即自動連接 room 1234</li>
+                <li>🔔 排程提醒 — 檢查清單可設定時間，到期自動彈窗通知</li>
+                <li>🔄 手動同步 — 狀態指示器 + 同步按鈕</li>
+                <li>📱 自適應佈局 — 視窗縮小時排版自動折疊</li>
             </ul>
-            <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;">已知限制</h3>
+            <h3 style="font-size:19px;font-weight:500;margin-top:24px;margin-bottom:8px;">⚠️ 已知限制</h3>
             <ul style="color:#94a3b8;font-size:16px;line-height:1.8;padding-left:20px;">
                 <li>需要 Python 3.8+ 執行信令伺服器</li>
                 <li>跨子網需要網路設備支援 UDP 路由</li>
-                <li>實時短信訊息傳送需所有用戶保持連線</li>
+                <li>多人同時傳檔時，每個對象同時只能傳一個檔案</li>
+                <li>STUN/TURN 未實作，部分 NAT 環境可能無法 P2P 連線（自動降為 WS Relay）</li>
             </ul>
-            <p style="margin-top:24px;border-top:1px solid #1e293b;padding-top:16px;">
+            <p style="margin-top:24px;border-top:1px solid #1e293b;padding-top:16px;display:flex;gap:8px;">
                 <button class="btn btn-secondary" id="btnDump" style="font-size:15px;">🔍 Debug Dump</button>
+                <span style="font-size:12px;color:#475569;align-self:center;">
+                    <a href="https://github.com/hug0-l/vcc-clipper" target="_blank" style="color:#38bdf8;text-decoration:none;">GitHub</a>
+                </span>
             </p>
         </div>
     </section>

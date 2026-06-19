@@ -12,17 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### 🚀 新增功能
 
 - **📋 公告欄分頁** — 完整 CRUD 公告貼文，支援釘選置頂
-- **✅ 檢查清單分頁** — 新增/勾選/刪除待辦事項
-- **🏷️ 公告欄分類** — 4 級分類（重要🔴 / 日常🔵 / 交接事項🟡 / 其他事項⚪），自動色碼、標籤 badges
-- **📋 檢查清單 Boards** — 階層式結構，每個 Board 可獨立命名、設色、加標籤、釘選
+- **🏷️ 公告欄分類** — 4 級分類（重要🔴/日常🔵/交接事項🟡/其他事項⚪），自動色碼、標籤 badges
+- **✅ 檢查清單 Boards** — 階層式結構，每個 Board 可獨立命名、設色、加標籤、釘選、可收合
 - **🔄 Tick Reset** — 一鍵重設 Board 內所有勾選
-- **💬 實時短信持久化** — 聊天訊息自動儲存至 localStorage，重整不消失
+- **🔔 排程提醒** — 設定日期時間，到期自動彈窗通知
+- **💬 實時短信持久化** — 聊天訊息自動儲存至 localStorage，重整不消失（最多 200 則）
+- **🎨 用戶顏色區分** — 根據顯示名稱自動分配 HSL 色相，一眼辨識發話者
 - **🗑️ 清除本機聊天紀錄** — 確認對話框防誤刪
 - **🖥️ 伺服器持久化** — 公告欄、檢查清單、聊天備份全部儲存至伺服器 JSON 檔案
-- **🔍 Debug Dump** — 一鍵輸出伺服器完整診斷資料
+- **🔧 聊天備份留存** — 可設定 `CHAT_RETENTION_DAYS`（預設 7 天）
+- **🔄 WS Relay 後備** — WebRTC DataChannel 失敗時自動降級為 WebSocket 中繼傳輸
+- **⚙️ 設定分頁** — 檢視傳輸模式（P2P/Relay）及各用戶連線狀態
+- **🔍 Debug Dump** — 一鍵輸出伺服器完整診斷資訊
 - **🕐 頁頂時鐘** — 即時顯示 hh:mm:ss 及當日日期
 - **🔗 預設配對碼** — 自動填入 1234 並在頁面載入後快速建立配對
-- **✏️ 顯示名稱標示** — 輸入名稱旁顯示「你現在顯示為：」
+- **✏️ 顯示名稱跨 F5 保留** — 使用 localStorage 儲存，重整不重置
+- **🔔 Popup 通知** — 新公告/新檢查清單/新待辦項目時右下角彈窗
+- **🟢 同步狀態指示器** — footer 顯示最後同步時間 + 手動同步按鈕
 
 ### 🔧 改善
 
@@ -31,19 +37,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **🛡️ Room-State Merge** — 同步時合併而非覆寫，保留本機資料
 - **🚨 連線守衛** — 公告編輯等操作補上連線檢查
 - **🗑️ 防誤刪確認** — 公告欄及檢查清單所有刪除動作皆有確認對話框
+- **📋 公告欄連線檢查** — 編輯公告也需先建立連線
+- **📂 檔案傳輸改為需選對象** — 不再預設傳送給所有人
+- **🔊 伺服器 Verbose DEBUG** — `_debug()` 微秒精度日誌，所有 WS 收發可追蹤
+- **🔄 自動重新同步** — 斷線重連後自動發送 state-get
+
+### 🐛 修復
+
+- **資料覆蓋問題** — room-state 改為合併而非覆寫 local-only 資料
 
 ### 🏗️ 架構
 
-- **C/S 分離** — WebSocket 負責持久資料 CRUD，DataChannel 負責即時通訊
+- **C/S 分離** — WebSocket 負責持久資料 CRUD + Relay，DataChannel 負責即時通訊
 - **localStorage + 伺服器 JSON 雙重持久化**
 - **聊天備份** — 7 日留存可調，不影響 P2P 即時通訊
+- **WebRTC 優先，WS Relay 後備** — 自適應傳輸模式
 
 ### 檔案統計 (vs v1.0)
 
 | 檔案 | v1.0 | 1.1.0 | 變更 |
 |------|------|-------|------|
-| VCC_Clipper.html | 1,497 行 | ~2,630 行 | +1,133 |
-| signal_server.py | 190 行 | ~570 行 | +380 |
+| VCC_Clipper.html | 1,497 行 | ~2,960 行 | +1,463 |
+| signal_server.py | 190 行 | ~640 行 | +450 |
+| CHANGELOG.md | — | 新增 | +80 |
+| README.md | 99 行 | 161 行 | +62 |
+
+### 完整 Commit History
+
+```
+1f334a4 feat(relay): add WebSocket relay fallback + settings tab
+c7d406d feat(server): add verbose DEBUG logging
+05efec8 feat(ui): add sync status indicator and manual sync button
+c5ae09d fix(ui): persist display name across F5
+cd92d48 feat(checklist): add scheduled reminder notifications
+1445b49 feat(ui): add popup notifications for new notices/checklists
+9d317e6 fix(file): no default target for file transfer
+4bafacc feat(chat): color-code different users in IM
+c5a5a03 feat(ui): add live clock hh:mm:ss and date
+8419153 docs: add CHANGELOG.md
+582c3e8 feat(checklist): add tick reset + solo reliability
+...以及 v1.0 的基礎功能
+```
 
 ## [1.0.0] — 初始版本
 
