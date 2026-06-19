@@ -840,12 +840,7 @@ footer input[type="text"] {
     line-height: 1.6;
 }
 .modal-buttons {
-    display: flex;
-    justify-content: center;
     gap: 12px;
-}
-    from { transform: translateY(-100%); }
-    to { transform: translateY(0); }
 }
 
 /* --- Checklist Styles --- */
@@ -1215,8 +1210,11 @@ footer input[type="text"] {
                             <p>預設使用香港天文台 NTP 伺服器 (<code>stdtime.gov.hk</code>)</p>
                             <p>伺服器每 60 秒自動同步，Client 每 5 秒請求一次</p>
                             <p>延遲 < 5ms，幾乎無感</p>
-                        </div>
-                    </div>
+                        </div>                        <div style="padding:10px 14px;background:#1e293b;border-radius:8px;font-size:13px;color:#64748b;line-height:1.6;">
+                            <p>預設使用香港天文台 NTP 伺服器 (<code>stdtime.gov.hk</code>)</p>
+                            <p>伺服器每 60 秒自動同步，Client 每 5 秒請求一次</p>
+                            <p>偏移量顯示 <span style="color:#22c55e;">🟢 綠色</span> = 連線正常 | <span style="color:#ef4444;">🔴 紅色</span> = 無回應</p>
+                        </div>                    </div>
                 </div>
                 <!-- Password -->
                 <div class="admin-pane" id="adminPanePassword" style="display:none;">
@@ -1355,8 +1353,8 @@ const APP = {
         _lastClientTime: 0,
         ntpEnabled: false,
         ntpServer: 'stdtime.gov.hk',
-        stunServer: 'stun:stun.l.google.com:19302',
-    },
+        stunServer: 'stun:stun.l.google.com:19302',        stunServer: 'stun:stun.l.google.com:19302',
+        ntpValid: false,    },
     updateStatus(status) {
         const badge = document.getElementById('statusBadge');
         badge.classList.remove('connected', 'connecting', 'disconnected');
@@ -2285,16 +2283,14 @@ function handleWsMessage(data) {
                 APP.state.timeSource = 'server';
                 APP.state.ntpEnabled = data.ntpEnabled || false;
                 APP.state.ntpServer = data.ntpServer || 'stdtime.gov.hk';
+                APP.state.ntpValid = data.ntpValid !== undefined ? data.ntpValid : APP.state.ntpValid;
                 // Only accept offset within reasonable range (< 24h difference)
                 if (Math.abs(APP.state.serverTimeOffset) > 86400000) {
                     APP.state.timeSource = 'local';
                 }
+                // Update admin NTP offset display if visible
+                updateSettingsView();
             }
-            break;
-
-        case 'dump-result':
-            console.log('=== Server Dump ===', JSON.stringify(data, null, 2));
-            APP.showStatusMsg('🔍 伺服器資料已輸出到開發者主控台');
             break;
 
         case 'relay-data':
@@ -2416,12 +2412,24 @@ function handleWsMessage(data) {
             break;
 
         case 'error':
-            APP.showStatusMsg('❌ ' + (data.message || '錯誤'));
+            if (data.message === 'unauthorized' && _adminLoggedIn) {
+                // Session expired - let the admin handler reset the UI
+                handleAdminMessage(data);
+            } else {
+                APP.showStatusMsg('❌ ' + (data.message || '錯誤'));
+            }
+            break;
+
+        case 'pong':
+            // Heartbeat response — no action needed
             break;
 
         default:
-            if (typeof handleAdminMessage === 'function') handleAdminMessage(data);
-            console.log('[WS] Unknown message type:', type);
+            if (typeof handleAdminMessage === 'function') {
+                handleAdminMessage(data);
+            } else {
+                console.log('[WS] Unknown message type:', type);
+            }
     }
     } catch (e) {
         console.error('[WS] Handler error', e);
@@ -2456,6 +2464,7 @@ function removePeer(peerId) {
     }
     APP.state.peers.delete(peerId);
     APP.state.peerNames.delete(peerId);
+    APP.state.selectedTargetPeerIds.delete(peerId);
     appendSystemMessage(`${displayName} 已離開連線`);
     APP.updatePeerCount();
     if (APP.state.peers.size === 0) {
@@ -3777,6 +3786,18 @@ function getEffectiveTargets() {
     return new Set(APP.state.selectedTargetPeerIds);
 }
 
+function isPeerReachable(pid) {
+    const ps = APP.state.peers.get(pid);
+    if (!ps) return false;
+    // P2P DataChannel is open
+    if (ps.dc && ps.dc.readyState === 'open') return true;
+    // Known to be reachable via WS relay
+    if (ps.relay) return true;
+    // WebRTC connection state indicates connected (DC may be temporarily null)
+    if (ps.connected) return true;
+    return false;
+}
+
 function updatePeerTargetUI() {
     const container = document.getElementById('fileTargetSelect');
     const list = document.getElementById('peerTargetList');
@@ -3797,20 +3818,20 @@ function updatePeerTargetUI() {
     // "All" button
     const allBtn = document.createElement('button');
     const allSelected = APP.state.selectedTargetPeerIds.size > 0 && APP.state.peers.size > 0 &&
-        [...APP.state.peers].every(([pid, ps]) => !ps.dc || ps.dc.readyState !== 'open' || APP.state.selectedTargetPeerIds.has(pid));
+        [...APP.state.peers].every(([pid]) => !isPeerReachable(pid) || APP.state.selectedTargetPeerIds.has(pid));
     allBtn.className = 'peer-target-btn' + (allSelected ? ' selected' : '');
     allBtn.textContent = '👥 全部';
     allBtn.addEventListener('click', () => {
         APP.state.selectedTargetPeerIds.clear();
         for (const [pid, ps] of APP.state.peers) {
-            if (ps.dc && ps.dc.readyState === 'open') APP.state.selectedTargetPeerIds.add(pid);
+            if (isPeerReachable(pid)) APP.state.selectedTargetPeerIds.add(pid);
         }
         updatePeerTargetUI();
     });
     list.appendChild(allBtn);
     // Per-peer buttons
     for (const [pid, ps] of APP.state.peers) {
-        if (!ps.dc || ps.dc.readyState !== 'open') continue;
+        if (!isPeerReachable(pid)) continue;
         const btn = document.createElement('button');
         const selected = APP.state.selectedTargetPeerIds.has(pid);
         btn.className = 'peer-target-btn' + (selected ? ' selected' : '');
@@ -3827,6 +3848,13 @@ function updatePeerTargetUI() {
             updatePeerTargetUI();
         });
         list.appendChild(btn);
+    }
+    // Auto-select sole reachable peer when none selected
+    const reachable = [...APP.state.peers.keys()].filter(pid => isPeerReachable(pid));
+    if (reachable.length === 1 && APP.state.selectedTargetPeerIds.size === 0) {
+        APP.state.selectedTargetPeerIds.add(reachable[0]);
+        updatePeerTargetUI();
+        return;
     }
 }
 
@@ -4209,10 +4237,22 @@ function updateSettingsView() {
         tsEl.style.color = APP.state.timeSource === 'server' ? '#22c55e' : '#94a3b8';
     }
     const offsetEl = document.getElementById('adminNtpOffset');
-    if (offsetEl && APP.state.serverTimeOffset !== 0) {
-        offsetEl.textContent = (APP.state.serverTimeOffset / 1000).toFixed(3) + 's';
+    if (offsetEl) {
+        if (APP.state.serverTimeOffset !== 0) {
+            offsetEl.textContent = (APP.state.serverTimeOffset / 1000).toFixed(3) + 's';
+        }
+        // Apply NTP validation color
+        if (APP.state.ntpValid) {
+            offsetEl.style.color = '#22c55e';
+            offsetEl.title = '✅ NTP 伺服器連線正常';
+        } else if (APP.state.ntpEnabled) {
+            offsetEl.style.color = '#ef4444';
+            offsetEl.title = '❌ NTP 伺服器無回應';
+        } else {
+            offsetEl.style.color = '#94a3b8';
+            offsetEl.title = 'NTP 已停用';
+        }
     }
-    // Render online user list
     const userList = document.getElementById('onlineUserList');
     if (userList) {
         const peers = [...APP.state.peerNames.entries()];
@@ -4253,6 +4293,13 @@ document.querySelectorAll('.admin-tab-btn').forEach(btn => {
         document.querySelectorAll('.admin-pane').forEach(p => p.style.display = 'none');
         const target = document.getElementById('adminPane' + btn.dataset.admintab.charAt(0).toUpperCase() + btn.dataset.admintab.slice(1));
         if (target) target.style.display = 'block';
+        // Auto-refresh content when switching to specific tabs
+        const tab = btn.dataset.admintab;
+        if (tab === 'logs' && _adminToken) {
+            _refreshLogViewer();
+        } else if (tab === 'config' && _adminToken) {
+            sendWsMessage({type: 'admin-get-config', token: _adminToken});
+        }
     });
 });
 
@@ -4287,7 +4334,20 @@ function handleAdminMessage(data) {
                     if (slider) slider.style.background = data.serverInfo.ntpEnabled !== false ? '#38bdf8' : '#475569';
                 }
                 const offsetEl = document.getElementById('adminNtpOffset');
-                if (offsetEl && data.serverInfo.ntpOffset !== undefined) offsetEl.textContent = data.serverInfo.ntpOffset + 's';
+                if (offsetEl && data.serverInfo.ntpOffset !== undefined) {
+                    offsetEl.textContent = data.serverInfo.ntpOffset + 's';
+                    // NTP validation status
+                    if (data.serverInfo.ntpValid !== undefined) {
+                        const isValid = data.serverInfo.ntpValid;
+                        if (data.serverInfo.ntpEnabled) {
+                            offsetEl.style.color = isValid ? '#22c55e' : '#ef4444';
+                            offsetEl.title = isValid ? '✅ NTP 伺服器連線正常' : '❌ NTP 伺服器無回應';
+                        } else {
+                            offsetEl.style.color = '#94a3b8';
+                            offsetEl.title = 'NTP 已停用';
+                        }
+                    }
+                }
                 document.getElementById('adminUptime').textContent = data.serverInfo.uptime ? Math.floor(data.serverInfo.uptime / 3600) + ' 小時 ' + Math.floor((data.serverInfo.uptime % 3600) / 60) + ' 分' : '---';
                 if (data.serverInfo.stunServer) APP.state.stunServer = data.serverInfo.stunServer;
                 document.getElementById('adminActiveRooms').textContent = data.serverInfo.activeRooms || 0;
@@ -4295,6 +4355,15 @@ function handleAdminMessage(data) {
                 document.getElementById('adminDataRooms').textContent = data.serverInfo.dataRooms || 0;
                 document.getElementById('adminRetention').textContent = data.serverInfo.chatRetentionDays + ' 天' || '---';
                 document.getElementById('adminDebug').textContent = data.serverInfo.debugMode ? '🟢 ON' : '🔴 OFF';
+            }
+            // Populate config fields from login response if available
+            if (data.config) {
+                document.getElementById('adminConfigRetention').value = data.config.chatRetentionDays || 7;
+                document.getElementById('adminLogPath').textContent = (data.config.logDir || 'logs') + '/' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.log';
+                const adminStunEl = document.getElementById('adminStunServer');
+                if (adminStunEl && data.config.stunServer) {
+                    adminStunEl.value = data.config.stunServer;
+                }
             }
             // Refresh logs automatically
             sendWsMessage({type: 'admin-logs', token: _adminToken, count: 50});
@@ -4328,8 +4397,7 @@ function handleAdminMessage(data) {
     } else if (data.type === 'admin-config') {
         if (data.config) {
             document.getElementById('adminConfigRetention').value = data.config.chatRetentionDays || 7;
-            document.getElementById('adminLogPath').textContent = data.config.dataFile || '---';
-            // STUN server
+            document.getElementById('adminLogPath').textContent = (data.config.logDir || 'logs') + '/' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.log';
             const adminStunEl = document.getElementById('adminStunServer');
             if (adminStunEl && data.config.stunServer) {
                 adminStunEl.value = data.config.stunServer;
@@ -4345,15 +4413,34 @@ function handleAdminMessage(data) {
             const ntpSrv = document.getElementById('adminNtpServer');
             if (ntpSrv) ntpSrv.value = data.config.ntpServer || 'stdtime.gov.hk';
             const offsetEl = document.getElementById('adminNtpOffset');
-            if (offsetEl) offsetEl.textContent = data.config.ntpOffset ? data.config.ntpOffset + 's' : '0s';
+            if (offsetEl) {
+                offsetEl.textContent = data.config.ntpOffset ? data.config.ntpOffset + 's' : '0s';
+                if (data.config.ntpValid !== undefined) {
+                    offsetEl.style.color = data.config.ntpValid ? '#22c55e' : '#ef4444';
+                    offsetEl.title = data.config.ntpValid ? '✅ NTP 伺服器連線正常' : '❌ NTP 伺服器無回應';
+                }
+            }
         }
     } else if (data.type === 'ntp-config-result') {
         if (data.ntpServer !== undefined) {
             document.getElementById('adminNtpServer').value = data.ntpServer;
         }
         const offsetEl = document.getElementById('adminNtpOffset');
-        if (offsetEl && data.ntpOffset !== undefined) offsetEl.textContent = data.ntpOffset + 's';
-        APP.showStatusMsg(data.ntpEnabled !== false ? '✅ NTP 時間同步已啟用' : '✅ NTP 時間同步已停用');
+        if (offsetEl && data.ntpOffset !== undefined) {
+            offsetEl.textContent = data.ntpOffset + 's';
+            // Show validation status
+            if (data.ntpValid !== undefined) {
+                offsetEl.style.color = data.ntpValid ? '#22c55e' : '#ef4444';
+                offsetEl.title = data.ntpValid ? '✅ NTP 伺服器連線正常' : '❌ NTP 伺服器無回應';
+            }
+        }
+        if (data.ntpEnabled === false) {
+            APP.showStatusMsg('⏸️ NTP 時間同步已停用');
+        } else if (data.ntpValid) {
+            APP.showStatusMsg('✅ NTP 伺服器連線成功 (偏移 ' + data.ntpOffset + 's)');
+        } else {
+            APP.showStatusMsg('❌ NTP 伺服器無回應 — 請檢查位址是否正確');
+        }
     } else if (data.type === 'admin-change-password-result') {
         const el = document.getElementById('adminPwResult');
         if (el) {
@@ -4369,6 +4456,9 @@ function handleAdminMessage(data) {
         }
     } else if (data.type === 'admin-set-config-result') {
         APP.showStatusMsg(data.success ? '✅ ' + data.message : '❌ ' + data.message);
+        if (data.success && data.config && data.config.stunServer) {
+            APP.state.stunServer = data.config.stunServer;
+        }
     } else if (data.type === 'admin-export-result') {
         // Download dump as JSON file
         if (data.dump) {
@@ -4432,9 +4522,13 @@ function _refreshLogViewer() {
         const logs = _getClientLogs(50);
         viewer.innerHTML = logs.map(l => escapeHtml(l)).join('<br>');
         viewer.scrollTop = viewer.scrollHeight;
+    } else if (APP.state._logSource === 'server') {
+        // Request server logs
+        if (_adminToken) {
+            sendWsMessage({type: 'admin-logs', token: _adminToken, count: 50});
+        }
     }
 }
-
 document.getElementById('btnDownloadLog')?.addEventListener('click', () => {
     if (_adminPassword) sendWsMessage({type: 'admin-log-download', token: _adminToken});
 });
@@ -4448,7 +4542,10 @@ document.getElementById('btnSaveConfig')?.addEventListener('click', () => {
     if (!_adminPassword) return;
     const retention = parseInt(document.getElementById('adminConfigRetention').value);
     if (isNaN(retention) || retention < 1) { APP.showStatusMsg('❌ 請輸入有效的天數'); return; }
-    sendWsMessage({type: 'admin-set-config', token: _adminToken, config: {chatRetentionDays: retention}});
+    const stunVal = document.getElementById('adminStunServer')?.value?.trim();
+    const cfg = {chatRetentionDays: retention};
+    if (stunVal) cfg.stunServer = stunVal;
+    sendWsMessage({type: 'admin-set-config', token: _adminToken, config: cfg});
 });
 
 // NTP toggle
@@ -4503,16 +4600,6 @@ document.getElementById('btnChangePw')?.addEventListener('click', () => {
     if (newPw.length < 4) { el.innerHTML = '<span style="color:#ef4444;">❌ 新密碼至少需要 4 個字元</span>'; return; }
     sendWsMessage({type: 'admin-change-password', password: _adminPassword, oldPassword: oldPw, newPassword: newPw});
 });
-
-// Intercept WS messages for admin (called from handleWsMessage)
-// We patch the switch by adding a catch-all in the default case
-// Instead, extend the existing handler
-(function() {
-    const origHandle = window.handleWsMessage;
-    if (origHandle) return;
-    // Inject admin handler into the WS router by patching the default case
-    console.log('[Admin] Ready — use admin messages via WS');
-})();
 
 // ========== Debug Dump ==========
 document.getElementById('btnDump')?.addEventListener('click', () => {

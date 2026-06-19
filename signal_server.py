@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import random
+import secrets
 import signal
 import socket
 import sqlite3
@@ -45,7 +46,7 @@ def _setup_logging():
     global _log_file
     os.makedirs(LOG_DIR, exist_ok=True)
     log_path = os.path.join(LOG_DIR, f"clipper_{datetime.now().strftime('%Y%m%d')}.log")
-    _log_file = open(log_path, 'a', encoding='utf-8')
+    _log._file = open(log_path, 'a', encoding='utf-8')
     return log_path
 
 def _rotate_logs():
@@ -239,7 +240,7 @@ NTP_PORT = 123
 NTP_PACKET = b'\x1b' + 47 * b'\x00'  # NTP v4, client mode
 
 def _ntp_query(server=None):
-    """Query NTP server and return offset in seconds. Returns 0 on failure."""
+    """Query NTP server and return (offset, is_valid). is_valid=False on failure."""
     if server is None:
         server = _ntp_config["server"]
     try:
@@ -251,7 +252,7 @@ def _ntp_query(server=None):
         t3 = time.time()
         sock.close()
         if len(data) < 48:
-            return 0
+            return (0, False)
         # Extract transmit timestamp (bytes 40-47)
         tx_ts = struct.unpack('!I', data[40:44])[0]
         tx_frac = struct.unpack('!I', data[44:48])[0]
@@ -259,10 +260,13 @@ def _ntp_query(server=None):
         # Calculate offset: ((t1 - t0) + (t2 - t3)) / 2  simplified
         rtt = t3 - t0
         offset = (tx_time - t0 - rtt / 2)
-        return offset
+        return (offset, True)
+    except socket.timeout:
+        _debug(f"NTP query timeout for {server}")
+        return (0, False)
     except Exception as e:
         _debug(f"NTP query failed: {e}")
-        return 0
+        return (0, False)
 
 
 def _ensure_room_data(rid):
@@ -771,6 +775,7 @@ async def handler(websocket):
                         "serverTime": server_ts,
                         "ntpEnabled": ntp_on,
                         "ntpServer": _ntp_config["server"],
+                        "ntpValid": _ntp_config.get("_ntp_valid", False),
                     }))
                 except:
                     pass
@@ -783,9 +788,14 @@ async def handler(websocket):
                     _ntp_config["server"] = data["ntpServer"]
                 if "ntpEnabled" in data:
                     _ntp_config["enabled"] = bool(data["ntpEnabled"])
+                ntp_valid = False
                 if _ntp_config["enabled"]:
-                    _ntp_config["offset"] = _ntp_query()
-                    _log('NTP', 'NTP sync from ' + _ntp_config["server"] + ': offset=' + str(_ntp_config["offset"]))
+                    offset, ntp_valid = _ntp_query()
+                    _ntp_config["offset"] = offset
+                    if ntp_valid:
+                        _log('NTP', 'NTP sync from ' + _ntp_config["server"] + ': offset=' + str(_ntp_config["offset"]))
+                    else:
+                        _log('NTP', 'NTP sync FAILED from ' + _ntp_config["server"])
                 else:
                     _ntp_config["offset"] = 0
                 await websocket.send(json.dumps({
@@ -793,10 +803,8 @@ async def handler(websocket):
                     "ntpServer": _ntp_config["server"],
                     "ntpEnabled": _ntp_config["enabled"],
                     "ntpOffset": round(_ntp_config["offset"], 3),
-                            "stunServer": _config["stunServer"],
+                    "ntpValid": ntp_valid,
                 }))
-
-            elif msg_type == "register-name":
                 rid = data.get("room")
                 name = data.get("displayName", "").strip()
                 if not rid or rid not in rooms or not name or not my_peer_id:
@@ -890,7 +898,14 @@ async def handler(websocket):
                             "ntpServer": _ntp_config["server"],
                             "ntpEnabled": _ntp_config["enabled"],
                             "ntpOffset": round(_ntp_config["offset"], 3),
+                            "ntpValid": _ntp_config.get("_ntp_valid", False),
                             "stunServer": _config["stunServer"],
+                        },
+                        "config": {
+                            "chatRetentionDays": CHAT_RETENTION_DAYS,
+                            "stunServer": _config["stunServer"],
+                            "logDir": LOG_DIR,
+                            "dataFile": DB_PATH,
                         }
                     }))
                     _log('ADMIN', f'{my_peer_id} logged in successfully')
@@ -943,10 +958,13 @@ async def handler(websocket):
                         "debug": DEBUG,
                         "logRetentionHours": LOG_RETENTION_HOURS,
                         "dataFile": DB_PATH,
+                        "logDir": LOG_DIR,
                         "ntpServer": _ntp_config["server"],
                         "ntpEnabled": _ntp_config["enabled"],
                         "ntpOffset": round(_ntp_config["offset"], 3),
-                            "stunServer": _config["stunServer"],
+                        "stunServer": _config["stunServer"],                        "ntpOffset": round(_ntp_config["offset"], 3),
+                        "ntpValid": _ntp_config.get("_ntp_valid", False),
+                        "stunServer": _config["stunServer"],
                     }
                 }))
 
@@ -960,7 +978,8 @@ async def handler(websocket):
                     _config["chatRetentionDays"] = int(cfg["chatRetentionDays"])
                 if "stunServer" in cfg:
                     _config["stunServer"] = str(cfg["stunServer"])
-                await websocket.send(json.dumps({"type": "admin-set-config-result", "success": True, "message": "設定已更新"}))
+                response = {"type": "admin-set-config-result", "success": True, "message": "設定已更新", "config": _config}
+                await websocket.send(json.dumps(response))
                 _log('ADMIN', f'{my_peer_id} updated server config')
 
             elif msg_type == "admin-export":
@@ -1142,17 +1161,16 @@ async def _ntp_sync_loop():
     while True:
         await asyncio.sleep(60)
         if _ntp_config["enabled"]:
-            offset = _ntp_query()
-            if offset != 0:
-                _ntp_config["offset"] = offset
+            offset, valid = _ntp_query()
+            _ntp_config["offset"] = offset
+            _ntp_config["_ntp_valid"] = valid
+            if valid:
                 _debug('NTP re-sync: offset=%.3fs' % _ntp_config['offset'])
-
 
 async def main():
     global _start_time
     _start_time = time.time()
     log_path = _setup_logging()
-    _log._file = open(log_path, 'a', encoding='utf-8')
     _rotate_logs()
     _init_db()
     _init_admin_password()
@@ -1165,9 +1183,13 @@ async def main():
     asyncio.create_task(_ntp_sync_loop())
     # Initial NTP sync
     if _ntp_config["enabled"]:
-        _ntp_config["offset"] = _ntp_query()
-        if _ntp_config["offset"] != 0:
+        offset, valid = _ntp_query()
+        _ntp_config["offset"] = offset
+        _ntp_config["_ntp_valid"] = valid
+        if valid:
             _log('NTP', 'Initial NTP sync from ' + _ntp_config["server"] + ': offset=' + str(_ntp_config["offset"]))
+        else:
+            _log('NTP', 'Initial NTP sync FAILED from ' + _ntp_config["server"])
     total_notices = sum(len(r.get("noticePosts", [])) for r in room_data.values())
     total_boards = sum(len(r.get("checklists", [])) for r in room_data.values())
     total_chats = sum(len(r.get("chatMessages", [])) for r in room_data.values())

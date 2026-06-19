@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Clipper-specific
+*.db
+*.db-journal
+*.db-wal
+vcc_server_state.json.bak
+logs/
+.refact/
+.ai/
+.idea/

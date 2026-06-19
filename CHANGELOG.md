@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### 🐛 修復
+
+- **管理面板無法取得伺服器日誌** — `_refreshLogViewer()` 現在會向伺服器請求日誌，切換管理頁籤時自動刷新
+- **伺服器設定未回傳到網頁端** — 登入成功時一併回傳 config（含 logDir），管理面板正確顯示日誌路徑
+- **`secrets` 模組未 import** — 導致 admin session token 生成時 `NameError`
+- **JS 殘留孤立程式碼** — 造成整個 script 無法解析，web client freeze
+- **檔案傳輸無法選取 relay-only 對等點** — 新增 `isPeerReachable()` 輔助函式，WS Relay 用戶現在可被選取為傳送對象
+- **管理面板 unauthorized 未處理** — 會話過期時自動回到登入畫面
+- **STUN 變更未即時生效** — 儲存 STUN 伺服器後立即更新本地狀態
+- **CSS 孤立 @keyframes block** — 移除殘留的無效 CSS
+
+### 🔧 改善
+
+- **管理面板服務器日誌路徑** — 正確顯示 `logs/clipper_&lt;date&gt;.log` 而非資料庫路徑
+- **檔案傳輸單一對等點自動選取** — 只剩一位可送達對象時自動選取，減少操作步驟
+- **對等點離開時清理已選取對象** — `removePeer()` 現在一併清理 `selectedTargetPeerIds`
+- **管理面板切換自動刷新** — 切換到日誌/設定頁籤時自動請求最新資料
+- **`admin-set-config` 回應含 config** — 伺服器在設定更新後回傳當前 config 狀態
+- **NTP 伺服器驗證** — `_ntp_query()` 回傳 `(offset, is_valid)` tuple，區分「偏移為零」與「查詢失敗」
+- **NTP 驗證可視化** — 管理面板偏移量以 🟢 綠色（正常）/ 🔴 紅色（無回應）顯示，hover 可查看 tooltip
+- **NTP 儲存時即時驗證** — 儲存 NTP 伺服器後即顯示連線成功或失敗的明確訊息
+
 ## [1.1.0] — 2026-06-19
 
 ### 🚀 新增功能
@@ -19,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **💬 實時短信持久化** — 聊天訊息自動儲存至 localStorage，重整不消失（最多 200 則）
 - **🎨 用戶顏色區分** — 根據顯示名稱自動分配 HSL 色相，一眼辨識發話者
 - **🗑️ 清除本機聊天紀錄** — 確認對話框防誤刪
-- **🖥️ 伺服器持久化** — 公告欄、檢查清單、聊天備份全部儲存至伺服器 JSON 檔案
+- **🖥️ 伺服器持久化** — 公告欄、檢查清單、聊天備份全部儲存至伺服器 SQLite 資料庫
 - **🔧 聊天備份留存** — 可設定 `CHAT_RETENTION_DAYS`（預設 7 天）
 - **🔄 WS Relay 後備** — WebRTC DataChannel 失敗時自動降級為 WebSocket 中繼傳輸
 - **⚙️ 設定分頁** — 檢視傳輸模式（P2P/Relay）、各用戶連線狀態、STUN 伺服器設定
@@ -61,9 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 | 檔案 | v1.0 | 1.1.0 | 變更 |
 |------|------|-------|------|
-| clipper.html | 1,497 行 | ~3,100 行 | +1,600 |
-| signal_server.py | 190 行 | ~640 行 | +450 |
-| CHANGELOG.md | — | 新增 | +90 |
+| clipper.html | 1,497 行 | ~4,550 行 | +3,053 |
+| signal_server.py | 190 行 | ~1,200 行 | +1,010 |
+| CHANGELOG.md | — | 新增 | +85 |
 | README.md | 99 行 | 170 行 | +71 |
 
 ### 完整 Commit History
