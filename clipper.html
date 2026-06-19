@@ -1435,7 +1435,7 @@ const APP = {
         badge.classList.remove('connected', 'connecting', 'disconnected');
         if (status === 'connected') {
             badge.className = 'status-badge connected';
-            badge.textContent = '🟢 已連線';
+            badge.textContent = '🟢 已連線 (Relay)';
             APP.state.connected = true;
         } else if (status === 'connecting') {
             badge.className = 'status-badge connecting';
@@ -2772,14 +2772,12 @@ function handleWsMessage(data) {
 
 function connectToPeer(targetPeerId) {
     if (APP.state.peers.has(targetPeerId) || targetPeerId === APP.state.myPeerId) return;
-    // Lower peerId creates the offer (initiator), higher waits (responder)
-    if (APP.state.myPeerId < targetPeerId) {
-        console.log('[Mesh] Initiating connection to', targetPeerId);
-        startWebRTCPeer(targetPeerId, true, null);
-    } else {
-        console.log('[Mesh] Waiting for offer from', targetPeerId);
-        // Create a placeholder so we know about this peer
-        APP.state.peers.set(targetPeerId, { pc: null, dc: null, connected: false });
+    // Relay-only mode — no WebRTC PeerConnection
+    APP.state.peers.set(targetPeerId, { pc: null, dc: null, connected: false, relay: true });
+    APP.updatePeerCount();
+    if (!APP.state.connected) {
+        APP.updateStatus('connected');
+        APP.showPairingUI(false);
     }
 }
 
@@ -4067,12 +4065,9 @@ function markAllFailed() {
     updateFileUI();
 }
 
-// ========== Transport: WebRTC DC with WS Relay Fallback ==========
+// ========== Transport: WS Relay Only ==========
 function getPeerTransport(pid) {
-    const ps = APP.state.peers.get(pid);
-    if (!ps) return 'unknown';
-    if (ps.dc && ps.dc.readyState === 'open') return 'p2p';
-    return ps.relay ? 'relay' : 'p2p-failed';
+    return APP.state.peers.has(pid) ? 'relay' : 'unknown';
 }
 function updateTransportUI() {
     const el = document.getElementById('transportMode');
@@ -4080,20 +4075,12 @@ function updateTransportUI() {
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN)) { el.textContent = '---'; return; }
     const ps = [...APP.state.peers.keys()];
     if (ps.length === 0) { el.textContent = '🟡 等待其他用戶'; return; }
-    const modes = ps.map(pid => getPeerTransport(pid));
-    const allP2P = modes.every(m => m === 'p2p');
-    const anyRelay = modes.some(m => m === 'relay');
-    if (allP2P) { el.innerHTML = '🟢 P2P (WebRTC)'; el.style.color = '#22c55e'; }
-    else if (anyRelay) { el.innerHTML = '🟡 中繼 (WS Relay)'; el.style.color = '#f59e0b'; }
-    else { el.innerHTML = '🔴 連線失敗'; el.style.color = '#ef4444'; }
-    // Per-peer detail
+    el.innerHTML = '🟡 中繼 (WS Relay)'; el.style.color = '#f59e0b';
     const detail = document.getElementById('peerTransportDetail');
     if (detail) {
         detail.innerHTML = ps.map(pid => {
-            const m = getPeerTransport(pid);
             const name = APP.state.peerNames.get(pid) || pid;
-            const icon = m === 'p2p' ? '🟢' : m === 'relay' ? '🟡' : '🔴';
-            return '<div>' + icon + ' ' + escapeHtml(name) + '：<span style="color:#94a3b8">' + m + '</span></div>';
+            return '<div>🟡 ' + escapeHtml(name) + '：<span style="color:#94a3b8">relay</span></div>';
         }).join('');
     }
 }
@@ -4117,11 +4104,9 @@ function relayToPeers(jsonStr, peerIds) {
 }
 
 function broadcastToPeers(jsonStr) {
+    // Relay-only: always use WS relay
     for (const pid of APP.state.peers.keys()) {
-        if (!sendToPeerDC(pid, jsonStr)) {
-            // DC failed or not open → fallback to relay
-            relayToPeer(pid, jsonStr);
-        }
+        relayToPeer(pid, jsonStr);
     }
 }
 
@@ -4138,15 +4123,8 @@ function getEffectiveTargets() {
 }
 
 function isPeerReachable(pid) {
-    const ps = APP.state.peers.get(pid);
-    if (!ps) return false;
-    // P2P DataChannel is open
-    if (ps.dc && ps.dc.readyState === 'open') return true;
-    // Known to be reachable via WS relay
-    if (ps.relay) return true;
-    // WebRTC connection state indicates connected (DC may be temporarily null)
-    if (ps.connected) return true;
-    return false;
+    // Relay-only: all peers are reachable
+    return APP.state.peers.has(pid);
 }
 
 function updatePeerTargetUI() {
@@ -4225,7 +4203,7 @@ async function sendFileToPeer(entry, pid) {
         sendToPeers(metaMsg, new Set([pid]));
 
         const peerState = APP.state.peers.get(pid);
-        const useRelay = !(peerState && peerState.dc && peerState.dc.readyState === 'open');
+        const useRelay = true;  // Relay-only mode
 
         for (let i = 0; i < totalChunks; i++) {
             const start = i * CHUNK_SIZE;
