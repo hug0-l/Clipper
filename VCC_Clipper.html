@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VCC Clipper v1.0</title>
+<style>
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+body {
+    background: #090d16;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    min-width: 800px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+header {
+    background: #111827;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 1px solid #1e293b;
+}
+header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    background: #1e293b;
+}
+.status-badge.connected {
+    background: #064e3b;
+    color: #6ee7b7;
+}
+.status-badge.connecting {
+    background: #451a03;
+    color: #fdba74;
+}
+.status-badge.disconnected {
+    background: #450a0a;
+    color: #fca5a5;
+}
+.room-code {
+    margin-left: auto;
+    font-size: 13px;
+    color: #94a3b8;
+}
+.room-code span {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    color: #38bdf8;
+    font-weight: 600;
+}
+.peer-count {
+    margin-left: 4px;
+    font-size: 12px;
+    color: #64748b;
+}
+nav {
+    display: flex;
+    gap: 0;
+    background: #111827;
+    border-bottom: 1px solid #1e293b;
+    padding: 0 12px;
+}
+.tab-btn {
+    padding: 10px 20px;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 14px;
+    font-family: inherit;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.tab-btn:hover {
+    color: #e2e8f0;
+    background: #1e293b;
+}
+.tab-btn.active {
+    color: #38bdf8;
+    border-bottom-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.08);
+}
+.tab-spacer {
+    flex: 1;
+}
+main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+.tab-pane {
+    display: none;
+}
+.tab-pane.active {
+    display: block;
+    animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+    from { opacity: 0.3; }
+    to { opacity: 1; }
+}
+.pane-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: #64748b;
+    font-size: 24px;
+    gap: 12px;
+}
+.pane-placeholder p {
+    font-size: 14px;
+}
+footer {
+    background: #111827;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-top: 1px solid #1e293b;
+    flex-wrap: wrap;
+}
+footer label {
+    color: #94a3b8;
+    font-size: 13px;
+    white-space: nowrap;
+}
+footer input[type="text"],
+footer input[type="url"] {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+}
+footer input[type="text"]:focus,
+footer input[type="url"]:focus {
+    border-color: #38bdf8;
+}
+footer input[type="text"] {
+    width: 120px;
+}
+.server-url {
+    width: 200px !important;
+    margin-right: 8px;
+}
+.btn {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 500;
+    transition: background 0.15s, opacity 0.15s;
+}
+.btn:active {
+    opacity: 0.8;
+}
+.btn-primary {
+    background: #38bdf8;
+    color: #0f172a;
+}
+.btn-primary:hover {
+    background: #7dd3fc;
+}
+.btn-secondary {
+    background: #334155;
+    color: #e2e8f0;
+}
+.btn-secondary:hover {
+    background: #475569;
+}
+.btn-danger {
+    background: #dc2626;
+    color: #fff;
+}
+.btn-danger:hover {
+    background: #ef4444;
+}
+.btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.status-msg {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-left: 8px;
+    flex: 1;
+}
+.pairing-code {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+/* ===== File Transfer Styles ===== */
+.file-transfer-container {
+    max-width: 600px;
+    margin: 0 auto;
+}
+.file-drop-zone {
+    border: 2px dashed #334155;
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    color: #94a3b8;
+}
+.file-drop-zone:hover,
+.file-drop-zone.drag-over {
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.05);
+}
+.drop-zone-icon {
+    font-size: 36px;
+    margin-bottom: 8px;
+}
+.file-overall {
+    font-size: 13px;
+    color: #94a3b8;
+    margin: 12px 0 8px;
+}
+.file-queue {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+    min-height: 60px;
+}
+.file-item {
+    background: #1e293b;
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+.file-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.file-name {
+    font-weight: 500;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+}
+.file-size {
+    color: #64748b;
+    font-size: 12px;
+    white-space: nowrap;
+}
+.file-progress-bar {
+    height: 6px;
+    background: #0f172a;
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 4px;
+}
+.file-progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: #38bdf8;
+    transition: width 0.15s;
+}
+.file-progress-fill.done {
+    background: #22c55e;
+}
+.file-progress-fill.error {
+    background: #ef4444;
+}
+.file-status {
+    font-size: 11px;
+    color: #64748b;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.file-status .sending { color: #38bdf8; }
+.file-status .done { color: #22c55e; }
+.file-status .error { color: #ef4444; }
+.file-retry-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    border: 1px solid #ef4444;
+    background: transparent;
+    color: #ef4444;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.file-retry-btn:hover {
+    background: rgba(239, 68, 68, 0.1);
+}
+.file-target-select {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #1e293b;
+}
+.file-target-select .peer-target-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid #334155;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+.file-target-select .peer-target-btn:hover {
+    border-color: #38bdf8;
+}
+.file-target-select .peer-target-btn.selected {
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.1);
+    color: #38bdf8;
+}
+.file-target-select .peer-target-btn.deselected {
+    border-color: #334155;
+    background: transparent;
+    color: #475569;
+}
+/* --- Chat Room Styles --- */
+.chat-container { display:flex; flex-direction:column; height:calc(100vh - 200px); max-width:700px; margin:0 auto; }
+.chat-messages { flex:1; overflow-y:auto; padding:12px; background:#0f172a; border-radius:8px; margin-bottom:8px; display:flex; flex-direction:column; gap:4px; }
+.chat-msg { padding:8px 12px; border-radius:8px; max-width:80%; word-break:break-word; line-height:1.5; }
+.chat-msg.self { align-self:flex-end; background:#1d4ed8; color:#fff; }
+.chat-msg.other { align-self:flex-start; background:#1e293b; color:#e2e8f0; }
+.chat-msg .msg-sender { font-size:11px; opacity:0.7; margin-bottom:2px; }
+.chat-msg .msg-time { font-size:10px; opacity:0.5; text-align:right; margin-top:2px; }
+.chat-input-bar { display:flex; gap:8px; }
+.chat-input-bar input { flex:1; background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:10px 14px; border-radius:8px; font-size:14px; outline:none; }
+.chat-input-bar input:focus { border-color:#38bdf8; }
+.display-name-span { cursor:pointer; padding:4px 8px; border-radius:6px; font-size:13px; color:#e2e8f0; background:#1e293b; border:1px solid transparent; transition:border-color 0.15s; white-space:nowrap; }
+.display-name-span:hover { border-color:#334155; }
+.display-name-span.editing { border-color:#38bdf8; background:#0f172a; }
+
+/* --- Error Toast --- */
+#errorToast {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    padding: 10px 20px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 500;
+    background: #7f1d1d;
+    color: #fca5a5;
+    border-bottom: 1px solid #991b1b;
+}
+#errorToast.visible {
+    display: block;
+    animation: slideDown 0.25s ease;
+}
+#errorToast .toast-msg {
+    display: inline;
+    margin-right: 12px;
+}
+#errorToast .toast-btn {
+    padding: 4px 12px;
+    border: 1px solid #fca5a5;
+    border-radius: 4px;
+    background: transparent;
+    color: #fca5a5;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+}
+#errorToast .toast-btn:hover {
+    background: rgba(252, 165, 165, 0.1);
+}
+@keyframes slideDown {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(0); }
+}
+
+</style>
+</head>
+<body>
+
+<header>
+    <h1>VCC Clipper v1.0</h1>
+    <span class="status-badge disconnected" id="statusBadge">🔴 未連線</span>
+    <span class="peer-count" id="peerCount"></span>    <span class="display-name-span" id="displayNameSpan"></span>
+
+    <div class="room-code">代碼: <span id="roomCode">---</span></div>
+</header>
+
+<nav>
+    <button class="tab-btn active" data-target="clipboard">💬 聊天室</button>
+    <button class="tab-btn" data-target="filetransfer">📁 檔案傳輸</button>
+
+    <button class="tab-btn" data-target="about">ℹ️ 關於</button>
+    <div class="tab-spacer"></div>
+</nav>
+
+<main>
+    <div id="errorToast" class=""></div>
+    <section class="tab-pane active" data-tab="clipboard">
+        <div class="chat-container" id="chatContainer">
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="chat-input-bar">
+                <input type="text" id="chatInput" placeholder="輸入訊息，Enter 發送...">
+                <button class="btn btn-primary" id="btnChatSend">發送</button>
+            </div>
+        </div>
+    </section>
+    <section class="tab-pane" data-tab="filetransfer">
+        <div class="file-transfer-container">
+            <div class="file-drop-zone" id="fileDropZone">
+                <div class="drop-zone-icon">📁</div>
+                <p>拖曳檔案到此處，或點擊選擇檔案</p>
+                <input type="file" id="fileInput" multiple hidden>
+            </div>
+            <div class="file-target-select" id="fileTargetSelect" style="display:none">
+                <div style="font-size:13px;color:#94a3b8;margin-bottom:6px;">📤 傳送對象:</div>
+                <div id="peerTargetList"></div>
+            </div>
+            <div class="file-overall" id="fileOverall">0 / 0 個檔案完成</div>
+            <div class="file-queue" id="fileQueue"></div>
+            <button class="btn btn-secondary file-clear-btn" id="btnClearDone" style="display:none">清除已完成</button>
+        </div>
+    </section>
+
+    <section class="tab-pane" data-tab="about">
+        <div style="max-width:500px;margin:0 auto;">
+            <h2 style="font-size:20px;font-weight:600;margin-bottom:12px;">關於 VCC Clipper</h2>
+            <p style="color:#94a3b8;margin-bottom:20px;line-height:1.7;">
+                VCC Clipper 是一套內網跨子網 P2P 協作工具，透過 WebRTC 建立點對點連線，
+            </p>
+            <table style="color:#94a3b8;font-size:13px;line-height:2;">
+                <tr><td style="padding-right:20px;color:#64748b;">版本</td><td>v1.0.0</td></tr>
+                <tr><td style="padding-right:20px;color:#64748b;">作者</td><td>RTHKVCC Team</td></tr>
+                <tr><td style="padding-right:20px;color:#64748b;">技術</td><td>WebRTC · WebSocket · Python</td></tr>
+                <tr><td style="padding-right:20px;color:#64748b;">授權</td><td>MIT</td></tr>
+            </table>
+            <h3 style="font-size:15px;font-weight:500;margin-top:24px;margin-bottom:8px;">功能</h3>
+            <ul style="color:#94a3b8;font-size:13px;line-height:1.8;padding-left:20px;">
+                <li>💬 聊天室 — 即時訊息廣播</li>
+                <li>📁 檔案傳輸 — 拖放上傳，支援大檔案</li>
+
+            </ul>
+            <h3 style="font-size:15px;font-weight:500;margin-top:24px;margin-bottom:8px;">已知限制</h3>
+            <ul style="color:#94a3b8;font-size:13px;line-height:1.8;padding-left:20px;">
+                <li>需要 Python 3.8+ 執行信令伺服器</li>
+                <li>跨子網需要網路設備支援 UDP 路由</li>
+                <li>聊天室訊息傳送需所有用戶保持連線</li>
+            </ul>
+        </div>
+    </section>
+</main>
+
+<footer>
+    <label for="serverUrl">Server:</label>
+    <input type="url" id="serverUrl" class="server-url" value="ws://localhost:8765" placeholder="ws://localhost:8765">
+    <div class="pairing-controls" id="pairingControls">
+        <button class="btn btn-primary" id="btnCreatePair">建立配對</button>
+        <div class="pairing-code">
+            <input type="text" id="pairingCode" placeholder="配對代碼">
+            <button class="btn btn-secondary" id="btnJoinPair">加入配對</button>
+        </div>
+    </div>
+    <button class="btn btn-danger" id="btnDisconnect" style="display:none">中斷</button>
+    <span class="status-msg" id="statusMsg"></span>
+</footer>
+
+<script>
+const APP = {
+    state: {
+        connected: false,
+        room: null,
+        peerId: null,
+        myPeerId: null,
+        peers: new Map(),
+        ws: null,
+        displayName: '',
+        peerNames: new Map(), // peerId → display name
+        chatMessages: [],
+        fileQueue: [],
+        fileSending: null,
+        fileReceives: new Map(),
+        peerCurrentFile: new Map(),
+        selectedTargetPeerIds: new Set(),
+        sendDoneCount: 0,
+        intentionalDisconnect: false,
+    },
+    updateStatus(status) {
+        const badge = document.getElementById('statusBadge');
+        badge.classList.remove('connected', 'connecting', 'disconnected');
+        if (status === 'connected') {
+            badge.className = 'status-badge connected';
+            badge.textContent = '🟢 已連線';
+            APP.state.connected = true;
+        } else if (status === 'connecting') {
+            badge.className = 'status-badge connecting';
+            badge.textContent = '🟡 連線中';
+            APP.state.connected = false;
+        } else {
+            badge.className = 'status-badge disconnected';
+            badge.textContent = '🔴 未連線';
+            APP.state.connected = false;
+        }
+    },
+    updatePeerCount() {
+        const el = document.getElementById('peerCount');
+        const count = APP.state.peers.size;
+        if (count > 0) {
+            el.textContent = `👥 ${count} 位已連線`;
+        } else {
+            el.textContent = '';
+        }
+        if (typeof updatePeerTargetUI === 'function') {
+            updatePeerTargetUI();
+        }
+    },
+    setRoomCode(code) {
+        document.getElementById('roomCode').textContent = code || '---';
+    },
+    showStatusMsg(msg) {
+        document.getElementById('statusMsg').textContent = msg;
+    },
+    showPairingUI(show) {
+        document.getElementById('pairingControls').style.display = show ? '' : 'none';
+        document.getElementById('btnDisconnect').style.display = show ? 'none' : '';
+    },
+    showError(msg, showReconnect) {
+        const toast = document.getElementById('errorToast');
+        toast.className = 'visible';
+        toast.innerHTML = '<span class="toast-msg">' + msg.replace(/"/g, '&quot;') + '</span>'
+            + (showReconnect
+                ? '<button class="toast-btn" id="toastReconnectBtn">重新連線</button>'
+                : '<button class="toast-btn" style="margin-left:8px" onclick="document.getElementById(\'errorToast\').className=\'\'">✕</button>');
+        if (showReconnect) {
+            const btn = document.getElementById('toastReconnectBtn');
+            if (btn) btn.addEventListener('click', () => {
+                document.getElementById('errorToast').className = '';
+                const url = document.getElementById('serverUrl').value.trim() || 'ws://localhost:8765';
+                APP.showStatusMsg('正在重新連線...');
+                connectWebSocket(url).then(() => {
+                    // Reconnect: re-join the room or create a new one
+                    if (APP.state.room) {
+                        sendWsMessage({type: 'join', room: APP.state.room});
+                    } else {
+                        sendWsMessage({type: 'generate'});
+                    }
+                }).catch(() => {
+                    APP.showStatusMsg('❌ 重新連線失敗');
+                    APP.showError('信令伺服器離線', true);
+                });
+            });
+        }
+    }
+};
+
+// ========== Display Name ==========
+const ADJS = ['快樂','活潑','聰明','安靜','勇敢','溫柔','可愛','陽光','調皮','大方','瀟灑','優雅','熱情','冷靜','開朗'];
+const NOUNS = ['熊貓','海豚','老鷹','貓咪','狐狸','兔子','狼','老虎','獅子','企鵝','天鵝','蝴蝶','鸚鵡','鯨魚','樹懶'];
+function generateName() {
+    const a = ADJS[Math.floor(Math.random() * ADJS.length)];
+    const n = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+    const d = String(Math.floor(Math.random() * 90) + 10);
+    return a + n + d;
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const target = btn.dataset.target;
+        document.querySelectorAll('.tab-pane').forEach(pane => {
+            pane.classList.toggle('active', pane.dataset.tab === target);
+        });
+
+    });
+});
+
+// ========== WebSocket ==========
+
+function connectWebSocket(url) {
+    return new Promise((resolve, reject) => {
+        const ws = new WebSocket(url);
+        ws.onopen = () => {
+            console.log('[WS] Connected');
+            APP.state.ws = ws;
+            APP.showStatusMsg('WS 已連線');
+            resolve(ws);
+        };
+        ws.onerror = (err) => {
+            console.error('[WS] Error', err);
+            reject(err);
+        };
+        ws.onclose = () => {
+            console.log('[WS] Closed');
+            if (APP.state.ws === ws) {
+                APP.state.ws = null;
+                if (APP.state.room) {
+                    cleanupConnection();
+                    if (!APP.state.intentionalDisconnect) {
+                        APP.showError('⚠ 信令伺服器離線', true);
+                    }
+                    APP.showStatusMsg('連線中斷');
+                }
+            }
+        };
+        ws.onmessage = (event) => {
+            let data;
+            try {
+                data = JSON.parse(event.data);
+            } catch (_) {
+                console.warn('[WS] Non-JSON message', event.data);
+                return;
+            }
+            handleWsMessage(data);
+        };
+    });
+}
+
+function sendWsMessage(obj) {
+    if (APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) {
+        APP.state.ws.send(JSON.stringify(obj));
+    }
+}
+
+// ========== Message Router ==========
+
+function handleWsMessage(data) {
+    try {
+    const type = data.type;
+    console.log('[WS] <', type, data);
+
+    switch (type) {
+        case 'generated':
+            APP.state.room = data.room;
+            APP.setRoomCode(data.room);
+            APP.showStatusMsg(`配對代碼: ${data.room} — 等待其他人加入...`);
+            sendWsMessage({type: 'join', room: data.room});
+            break;
+
+        case 'joined':
+            APP.state.room = data.room;
+            APP.state.myPeerId = data.peerId;
+            APP.setRoomCode(data.room);
+            APP.showStatusMsg(`已加入配對 (我的 ID: ${data.peerId})`);
+            break;
+
+        case 'room_peers':
+            // Server tells us about existing peers in the room
+            for (const p of data.peers) {
+                connectToPeer(p.peerId);
+            }
+            break;
+
+        case 'peer_joined':
+            APP.showStatusMsg(`新成員加入 (${data.peerId})`);
+            connectToPeer(data.peerId);
+            break;
+
+        case 'offer':
+            APP.showStatusMsg('收到連線請求');
+            startWebRTCPeer(data.from, null, data.data);
+            break;
+
+        case 'answer':
+            {
+                const peerState = APP.state.peers.get(data.from);
+                if (peerState && peerState.pc && data.data) {
+                    peerState.pc.setRemoteDescription(new RTCSessionDescription(data.data))
+                        .catch(e => console.error('[PC] setRemoteDescription(answer) error', e));
+                }
+            }
+            break;
+
+        case 'ice-candidate':
+            {
+                const peerState = APP.state.peers.get(data.from);
+                if (peerState && peerState.pc && data.data) {
+                    peerState.pc.addIceCandidate(new RTCIceCandidate(data.data))
+                        .catch(e => console.error('[PC] addIceCandidate error', e));
+                }
+            }
+            break;
+
+        case 'peer_left':
+            APP.showStatusMsg(`成員離開 (${data.peerId})`);
+            removePeer(data.peerId);
+            break;
+
+        case 'room_full':
+            APP.showStatusMsg('❌ 房間已滿');
+            cleanupConnection();
+            break;
+
+        case 'error':
+            APP.showStatusMsg('❌ ' + (data.message || '錯誤'));
+            break;
+
+        default:
+            console.log('[WS] Unknown message type:', type);
+    }
+    } catch (e) {
+        console.error('[WS] Handler error', e);
+        APP.showError('處理訊息時發生錯誤: ' + (e.message || e), false);
+    }
+}
+
+// ========== Peer Connection Management ==========
+
+function connectToPeer(targetPeerId) {
+    if (APP.state.peers.has(targetPeerId) || targetPeerId === APP.state.myPeerId) return;
+    // Lower peerId creates the offer (initiator), higher waits (responder)
+    if (APP.state.myPeerId < targetPeerId) {
+        console.log('[Mesh] Initiating connection to', targetPeerId);
+        startWebRTCPeer(targetPeerId, true, null);
+    } else {
+        console.log('[Mesh] Waiting for offer from', targetPeerId);
+        // Create a placeholder so we know about this peer
+        APP.state.peers.set(targetPeerId, { pc: null, dc: null, connected: false });
+    }
+}
+
+function removePeer(peerId) {
+    const peerState = APP.state.peers.get(peerId);
+    if (!peerState) return;
+    const displayName = APP.state.peerNames.get(peerId) || peerId;
+    if (peerState.dc) {
+        try { peerState.dc.close(); } catch (_) {}
+    }
+    if (peerState.pc) {
+        try { peerState.pc.close(); } catch (_) {}
+    }
+    APP.state.peers.delete(peerId);
+    APP.state.peerNames.delete(peerId);
+    appendSystemMessage(`${displayName} 已離開連線`);
+    APP.updatePeerCount();
+    if (APP.state.peers.size === 0) {
+        APP.showStatusMsg('所有成員已離開');
+    }
+}
+
+// ========== WebRTC ==========
+
+function startWebRTCPeer(targetPeerId, isInitiator, remoteOffer) {
+    if (APP.state.peers.has(targetPeerId) && APP.state.peers.get(targetPeerId).pc) {
+        if (!remoteOffer) return; // already have a PC for this peer
+        // If we get an offer but already have a PC, close and recreate
+        const existing = APP.state.peers.get(targetPeerId);
+        try { if (existing.pc) existing.pc.close(); } catch (_) {}
+        APP.state.peers.delete(targetPeerId);
+    }
+
+    APP.updateStatus('connecting');
+
+    const pc = new RTCPeerConnection({iceServers: []});
+
+    if (isInitiator) {
+        const dc = pc.createDataChannel('vcc', {ordered: true});
+        setupDataChannel(dc, targetPeerId);
+    }
+
+    pc.ondatachannel = (event) => {
+        setupDataChannel(event.channel, targetPeerId);
+    };
+
+    // --- ICE trickle ---
+    pc.onicecandidate = (event) => {
+        if (event.candidate && APP.state.room) {
+            sendWsMessage({
+                type: 'ice-candidate',
+                room: APP.state.room,
+                to: targetPeerId,
+                data: event.candidate.toJSON()
+            });
+        }
+    };
+
+    // --- Connection state ---
+    pc.oniceconnectionstatechange = () => {
+        console.log(`[PC:${targetPeerId}] iceConnectionState:`, pc.iceConnectionState);
+        if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+            APP.showStatusMsg(`ICE 連線中斷 (${targetPeerId})`);
+            if (APP.state.peers.get(targetPeerId)?.connected) {
+                removePeer(targetPeerId);
+            }
+        }
+    };
+
+    pc.onconnectionstatechange = () => {
+        console.log(`[PC:${targetPeerId}] connectionState:`, pc.connectionState);
+        const peerState = APP.state.peers.get(targetPeerId);
+        if (pc.connectionState === 'connected') {
+            if (peerState) peerState.connected = true;
+            const connectedCount = getConnectedCount();
+            APP.updateStatus('connected');
+            APP.showStatusMsg(`WebRTC 已連線 — ${connectedCount} 位成員`);
+            APP.showPairingUI(false);
+            APP.updatePeerCount();
+        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+            APP.showStatusMsg(`連線中斷 (${targetPeerId})`);
+            if (APP.state.peers.get(targetPeerId)?.connected || pc.connectionState === 'failed') {
+                removePeer(targetPeerId);
+            }
+        }
+    };
+
+    // Store the peer
+    APP.state.peers.set(targetPeerId, {
+        pc: pc,
+        dc: isInitiator ? null : null, // will be set by setupDataChannel
+        connected: false
+    });
+
+    // --- Initiator: create offer ---
+    if (isInitiator) {
+        pc.createOffer()
+            .then(offer => pc.setLocalDescription(offer))
+            .then(() => {
+                if (APP.state.room && pc.localDescription) {
+                    sendWsMessage({
+                        type: 'offer',
+                        room: APP.state.room,
+                        to: targetPeerId,
+                        data: {type: pc.localDescription.type, sdp: pc.localDescription.sdp}
+                    });
+                }
+            })
+            .catch(e => console.error(`[PC:${targetPeerId}] createOffer error`, e));
+    } else if (remoteOffer) {
+        // Responder: set remote offer, create answer
+        pc.setRemoteDescription(new RTCSessionDescription(remoteOffer))
+            .then(() => pc.createAnswer())
+            .then(answer => pc.setLocalDescription(answer))
+            .then(() => {
+                if (APP.state.room && pc.localDescription) {
+                    sendWsMessage({
+                        type: 'answer',
+                        room: APP.state.room,
+                        to: targetPeerId,
+                        data: {type: pc.localDescription.type, sdp: pc.localDescription.sdp}
+                    });
+                }
+            })
+            .catch(e => console.error(`[PC:${targetPeerId}] createAnswer error`, e));
+    }
+}
+
+function getConnectedCount() {
+    let count = 0;
+    for (const p of APP.state.peers.values()) {
+        if (p.connected) count++;
+    }
+    return count;
+}
+
+// ========== Data Channel ==========
+
+function setupDataChannel(dc, peerId) {
+    dc.binaryType = 'arraybuffer';
+
+    dc.onopen = () => {
+        console.log(`[DC:${peerId}] Open`);
+        APP.showStatusMsg(`DataChannel 已開啟 (${peerId})`);
+        // Store the DC
+        const peerState = APP.state.peers.get(peerId);
+        if (peerState) {
+            peerState.dc = dc;
+            peerState.connected = true;
+        } else {
+            APP.state.peers.set(peerId, { pc: null, dc: dc, connected: true });
+        }
+        // Send display name to the new peer
+        try {
+            dc.send(JSON.stringify({type: 'peer-info', displayName: APP.state.displayName}));
+        } catch (e) {
+            console.error('[DC] send peer-info error', e);
+        }
+        APP.updatePeerCount();
+        if (!APP.state.connected) {
+            APP.updateStatus('connected');
+            APP.showPairingUI(false);
+        }
+    };
+
+    dc.onerror = (err) => {
+        console.error(`[DC:${peerId}] Error`, err);
+        APP.showError(`DataChannel 錯誤 (${peerId}) — 請嘗試重新連線`, true);
+        markAllFailed();
+    };
+
+    dc.onclose = () => {
+        console.log(`[DC:${peerId}] Closed`);
+        const peerState = APP.state.peers.get(peerId);
+        if (peerState) peerState.dc = null;
+        markAllFailed();
+    };
+
+    dc.onmessage = (event) => {
+        if (typeof event.data === 'string') {
+            try {
+                const msg = JSON.parse(event.data);
+                console.log(`[DC:${peerId}] Message:`, msg.type, msg);
+                switch (msg.type) {
+                    case 'peer-info':
+                        APP.state.peerNames.set(peerId, msg.displayName);
+                        appendSystemMessage(`${msg.displayName} 已加入連線`);
+                        APP.updatePeerCount();
+                        break;
+                    case 'chat':
+                        appendChatMessage(msg.from, msg.text, msg.timestamp);
+                        break;
+                    case 'file-meta':
+                        handleFileMeta(msg, peerId);
+                        break;
+                    case 'file-done':
+                        handleFileDone(msg, peerId);
+                        break;
+                    default:
+                        console.log(`[DC:${peerId}] Unknown message type:`, msg.type);
+                }
+            } catch (_) {
+                console.log(`[DC:${peerId}] Non-JSON string:`, event.data);
+            }
+        } else if (event.data instanceof ArrayBuffer) {
+            handleFileChunk(event.data, peerId);
+        };
+    };
+}
+
+// ========== Connection Management ==========
+
+function cleanupConnection() {
+    // Close all peer connections
+    for (const [peerId, peerState] of APP.state.peers) {
+        if (peerState.dc) {
+            try { peerState.dc.close(); } catch (_) {}
+        }
+        if (peerState.pc) {
+            try { peerState.pc.close(); } catch (_) {}
+        }
+    }
+    APP.state.peers.clear();
+    APP.state.peerNames.clear();
+    // Clear file transfer state
+    APP.state.fileQueue = [];
+    APP.state.fileSending = null;
+    APP.state.sendDoneCount = 0;
+    if (APP.state.fileReceives) APP.state.fileReceives.clear();
+    if (APP.state.peerCurrentFile) APP.state.peerCurrentFile.clear();
+    // Close WebSocket
+    if (APP.state.ws) {
+        try { APP.state.ws.close(); } catch (_) {}
+        APP.state.ws = null;
+    }
+    // Clear file transfer state
+    APP.state.fileQueue = [];
+    APP.state.fileSending = null;
+    APP.state.sendDoneCount = 0;
+    if (APP.state.fileReceives) APP.state.fileReceives.clear();
+    // Reset connection state
+    const hadRoom = !!APP.state.room;
+    APP.state.room = null;
+    APP.state.myPeerId = null;
+    APP.state.connected = false;
+    APP.state.intentionalDisconnect = false;
+    APP.setRoomCode(null);
+    APP.updateStatus('disconnected');
+    APP.showPairingUI(true);
+    APP.updatePeerCount();
+    if (hadRoom) {
+        APP.showStatusMsg('已中斷連線');
+    }
+}
+
+// ========== UI Handlers ==========
+
+function createRoom() {
+    if (APP.state.connected || APP.state.peers.size > 0) {
+        APP.showStatusMsg('請先中斷目前連線');
+        return;
+    }
+    const serverUrl = document.getElementById('serverUrl').value.trim() || 'ws://localhost:8765';
+    APP.showStatusMsg('正在連接伺服器...');
+    APP.updateStatus('connecting');
+
+    connectWebSocket(serverUrl)
+        .then(() => {
+            APP.showStatusMsg('正在建立配對...');
+            sendWsMessage({type: 'generate'});
+        })
+        .catch(() => {
+            APP.showStatusMsg('❌ 無法連線到伺服器');
+            APP.updateStatus('disconnected');
+        });
+}
+
+function joinRoom() {
+    if (APP.state.connected || APP.state.peers.size > 0) {
+        APP.showStatusMsg('請先中斷目前連線');
+        return;
+    }
+    const code = document.getElementById('pairingCode').value.trim();
+    if (!code) {
+        APP.showStatusMsg('請輸入配對代碼');
+        return;
+    }
+    const serverUrl = document.getElementById('serverUrl').value.trim() || 'ws://localhost:8765';
+    APP.showStatusMsg('正在連接伺服器...');
+    APP.updateStatus('connecting');
+
+    connectWebSocket(serverUrl)
+        .then(() => {
+            APP.showStatusMsg('正在加入配對...');
+            sendWsMessage({type: 'join', room: code});
+        })
+        .catch(() => {
+            APP.showStatusMsg('❌ 無法連線到伺服器');
+            APP.updateStatus('disconnected');
+        });
+}
+
+function disconnect() {
+    APP.state.intentionalDisconnect = true;
+    APP.showStatusMsg('正在中斷連線...');
+    cleanupConnection();
+    APP.showStatusMsg('已中斷連線');
+}
+
+
+// --- Wire up UI ---
+document.getElementById('btnCreatePair').addEventListener('click', createRoom);
+document.getElementById('btnJoinPair').addEventListener('click', joinRoom);
+document.getElementById('btnDisconnect').addEventListener('click', disconnect);
+
+// --- Initial state ---
+APP.state.displayName = generateName();
+document.getElementById('displayNameSpan').textContent = APP.state.displayName;
+APP.updateStatus('disconnected');
+APP.showPairingUI(true);
+APP.showStatusMsg('');
+
+// --- Display name editing ---
+document.getElementById('displayNameSpan').addEventListener('click', function() {
+    if (this.classList.contains('editing')) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = APP.state.displayName;
+    input.style.cssText = 'font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid #38bdf8;background:#0f172a;color:#e2e8f0;outline:none;width:120px;font-family:inherit;';
+    this.style.display = 'none';
+    this.parentNode.insertBefore(input, this.nextSibling);
+    input.focus();
+    input.select();
+    function commit(val) {
+        if (val && val.trim()) {
+            APP.state.displayName = val.trim();
+            const span = document.getElementById('displayNameSpan');
+            span.textContent = APP.state.displayName;
+            span.style.display = '';
+        } else {
+            document.getElementById('displayNameSpan').style.display = '';
+        }
+        if (input.parentNode) input.remove();
+    }
+    input.addEventListener('blur', () => commit(input.value));
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { commit(input.value); }
+        if (e.key === 'Escape') { commit(''); }
+    });
+});
+console.log('[VCC] App initialized');
+// ========== File Transfer ===
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+function updateFileUI() {
+    const queue = document.getElementById('fileQueue');
+    const overall = document.getElementById('fileOverall');
+    const clearBtn = document.getElementById('btnClearDone');
+
+    const items = [];
+    if (APP.state.fileSending) items.push(APP.state.fileSending);
+    for (const f of APP.state.fileQueue) {
+        if (!items.find(i => i.fileId === f.fileId)) items.push(f);
+    }
+
+    const doneCount = APP.state.sendDoneCount;
+    overall.textContent = `${doneCount} / ${items.length} 個檔案完成`;
+
+    if (items.length === 0) {
+        queue.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;font-size:13px">尚未選擇檔案</div>';
+        clearBtn.style.display = 'none';
+        return;
+    }
+
+    const hasDoneOrError = items.some(i => i.status === 'done' || i.status === 'error');
+    clearBtn.style.display = hasDoneOrError ? '' : 'none';
+
+    queue.innerHTML = items.map(f => {
+        const pct = f.progress || 0;
+        const statusMap = {pending: '等待中', sending: `傳送中 ${pct}%`, done: '已完成', error: '失敗'};
+        const statusText = statusMap[f.status] || f.status;
+        const fillClass = f.status === 'done' ? 'done' : f.status === 'error' ? 'error' : '';
+        const safeName = f.name.replace(/"/g, '&quot;');
+        const retryBtn = f.status === 'error' ? `<button class="file-retry-btn" data-file-id="${f.fileId}">重試</button>` : '';
+        return `<div class="file-item">
+            <div class="file-item-header">
+                <span class="file-name" title="${safeName}">${safeName}</span>
+                <span class="file-size">${formatFileSize(f.size)}</span>
+            </div>
+            <div class="file-progress-bar"><div class="file-progress-fill ${fillClass}" style="width:${pct}%"></div></div>
+            <div class="file-status"><span class="${f.status}">${statusText}</span>${retryBtn}</div>
+        </div>`;
+    }).join('');
+
+    queue.querySelectorAll('.file-retry-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const fileId = btn.dataset.fileId;
+            APP.state.fileQueue = APP.state.fileQueue.filter(f => f.fileId !== fileId);
+            if (APP.state.fileSending && APP.state.fileSending.fileId === fileId) {
+                APP.state.fileSending = null;
+            }
+            updateFileUI();
+        });
+    });
+}
+
+function handleFiles(fileList) {
+    if (!APP.state.connected) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
+    for (const file of fileList) {
+        APP.state.fileQueue.push({
+            file,
+            fileId: crypto.randomUUID(),
+            name: file.name,
+            size: file.size,
+            progress: 0,
+            status: 'pending'
+        });
+    }
+    updateFileUI();
+    if (!APP.state.fileSending) {
+        sendNextFile();
+    }
+}
+
+function markAllFailed() {
+    if (APP.state.fileSending) {
+        APP.state.fileSending.status = 'error';
+        APP.state.fileSending = null;
+    }
+    for (const f of APP.state.fileQueue) {
+        if (f.status === 'pending' || f.status === 'sending') {
+            f.status = 'error';
+        }
+    }
+    updateFileUI();
+}
+
+function broadcastToPeers(jsonStr) {
+    for (const peerState of APP.state.peers.values()) {
+        if (peerState.dc && peerState.dc.readyState === 'open') {
+            try {
+                peerState.dc.send(jsonStr);
+            } catch (e) {
+                console.error('[Broadcast] send error', e);
+            }
+        }
+    }
+}
+
+function sendToPeers(jsonStr, peerIds) {
+    for (const pid of peerIds) {
+        const peerState = APP.state.peers.get(pid);
+        if (peerState && peerState.dc && peerState.dc.readyState === 'open') {
+            try {
+                peerState.dc.send(jsonStr);
+            } catch (e) {
+                console.error('[SendTo] send error', e);
+            }
+        }
+    }
+}
+
+function getEffectiveTargets() {
+    if (APP.state.selectedTargetPeerIds.size > 0) {
+        return new Set(APP.state.selectedTargetPeerIds);
+    }
+    const all = new Set();
+    for (const [pid, ps] of APP.state.peers) {
+        if (ps.dc && ps.dc.readyState === 'open') all.add(pid);
+    }
+    return all;
+}
+
+function updatePeerTargetUI() {
+    const container = document.getElementById('fileTargetSelect');
+    const list = document.getElementById('peerTargetList');
+    const peerCount = APP.state.peers.size;
+    if (peerCount <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = '';
+    list.innerHTML = '';
+    // "All" button
+    const allBtn = document.createElement('button');
+    allBtn.className = 'peer-target-btn' + (APP.state.selectedTargetPeerIds.size === 0 ? ' selected' : '');
+    allBtn.textContent = '👥 全部';
+    allBtn.addEventListener('click', () => {
+        APP.state.selectedTargetPeerIds.clear();
+        updatePeerTargetUI();
+    });
+    list.appendChild(allBtn);
+    // Per-peer buttons
+    for (const [pid, ps] of APP.state.peers) {
+        if (!ps.dc || ps.dc.readyState !== 'open') continue;
+        const btn = document.createElement('button');
+        const selected = APP.state.selectedTargetPeerIds.has(pid) || APP.state.selectedTargetPeerIds.size === 0;
+        btn.className = 'peer-target-btn' + (selected ? ' selected' : ' deselected');
+        const dName = APP.state.peerNames.get(pid) || pid;
+        btn.textContent = `🖥 ${dName}`;
+        btn.title = pid;
+        btn.dataset.peerId = pid;
+        btn.addEventListener('click', () => {
+            if (APP.state.selectedTargetPeerIds.has(pid)) {
+                APP.state.selectedTargetPeerIds.delete(pid);
+            } else {
+                APP.state.selectedTargetPeerIds.add(pid);
+            }
+            updatePeerTargetUI();
+        });
+        list.appendChild(btn);
+    }
+}
+
+async function sendNextFile() {
+    if (APP.state.fileQueue.length === 0) {
+        APP.state.fileSending = null;
+        return;
+    }
+    // Check that at least one peer's DataChannel is open
+    let anyDcOpen = false;
+    for (const peerState of APP.state.peers.values()) {
+        if (peerState.dc && peerState.dc.readyState === 'open') {
+            anyDcOpen = true;
+            break;
+        }
+    }
+    if (!anyDcOpen) {
+        markAllFailed();
+        return;
+    }
+    const entry = APP.state.fileQueue.find(f => f.status === 'pending');
+    if (!entry) {
+        APP.state.fileSending = null;
+        return;
+    }
+    APP.state.fileSending = entry;
+    entry.status = 'sending';
+    updateFileUI();
+    try {
+        const buffer = await entry.file.arrayBuffer();
+        const CHUNK_SIZE = 16384;
+        const totalChunks = Math.ceil(buffer.byteLength / CHUNK_SIZE);
+        const metaMsg = JSON.stringify({type: 'file-meta', fileId: entry.fileId, name: entry.name, size: entry.size, chunks: totalChunks});
+
+                // Determine which peers to send to
+        const targets = getEffectiveTargets();
+        if (targets.size === 0) {
+            entry.status = 'error';
+            APP.state.fileSending = null;
+            updateFileUI();
+            return;
+        }
+
+        // Send meta to selected peers
+        sendToPeers(metaMsg, targets);
+
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, buffer.byteLength);
+            const chunk = buffer.slice(start, end);
+            // Send chunk to each selected peer with backpressure
+            for (const pid of targets) {
+                const peerState = APP.state.peers.get(pid);
+                if (peerState && peerState.dc && peerState.dc.readyState === 'open') {
+                    while (peerState.dc.bufferedAmount > 65536) {
+                        await new Promise(resolve => {
+                            peerState.dc.addEventListener('bufferedamountlow', resolve, { once: true });
+                        });
+                    }
+                    try {
+                        peerState.dc.send(chunk);
+                    } catch (e) {
+                        console.error('[FT] send chunk error', e);
+                    }
+                }
+            }
+            entry.progress = Math.round(((i + 1) / totalChunks) * 100);
+            updateFileUI();
+        }
+
+        const doneMsg = JSON.stringify({type: 'file-done', fileId: entry.fileId});
+        sendToPeers(doneMsg, targets);
+
+        entry.status = 'done';
+        entry.progress = 100;
+        APP.state.sendDoneCount++;
+        APP.state.fileSending = null;
+        updateFileUI();
+        sendNextFile();
+    } catch (err) {
+        console.error('[FT] Send failed', err);
+        entry.status = 'error';
+        APP.state.fileSending = null;
+        updateFileUI();
+    }
+}
+
+// ========== File Receive ==========
+
+function handleFileMeta(msg, fromPeerId) {
+    console.log('[FT] File meta:', msg.name, msg.size, msg.chunks, 'chunks', 'from', fromPeerId);
+    APP.state.fileReceives.set(msg.fileId, {
+        name: msg.name, size: msg.size, received: 0, blobs: [], status: 'receiving'
+    });
+    APP.state.peerCurrentFile.set(fromPeerId, msg.fileId);
+}
+
+function handleFileChunk(data, fromPeerId) {
+    const fileId = APP.state.peerCurrentFile.get(fromPeerId);
+    if (!fileId) return;
+    const entry = APP.state.fileReceives.get(fileId);
+    if (!entry || entry.status !== 'receiving') return;
+    entry.blobs.push(data);
+    entry.received += data.byteLength;
+}
+
+function handleFileDone(msg, fromPeerId) {
+    const entry = APP.state.fileReceives.get(msg.fileId);
+    if (!entry) return;
+    entry.status = 'done';
+
+    const blob = new Blob(entry.blobs, {type: 'application/octet-stream'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = entry.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    APP.showStatusMsg(`已接收: ${entry.name}`);
+
+    APP.state.fileReceives.delete(msg.fileId);
+    // Clear peerCurrentFile if this was the current file from this peer
+    if (APP.state.peerCurrentFile.get(fromPeerId) === msg.fileId) {
+        APP.state.peerCurrentFile.delete(fromPeerId);
+    }
+}
+
+// ========== File Transfer UI Wire-up ==========
+
+(function() {
+    const dropZone = document.getElementById('fileDropZone');
+    const fileInput = document.getElementById('fileInput');
+    const clearBtn = document.getElementById('btnClearDone');
+
+    dropZone.addEventListener('click', (e) => {
+        if (e.target === dropZone || e.target.closest('.drop-zone-icon') || e.target.tagName === 'P') {
+            fileInput.click();
+        }
+    });
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files.length > 0) {
+            handleFiles(fileInput.files);
+            fileInput.value = '';
+        }
+    });
+
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
+    });
+
+    clearBtn.addEventListener('click', () => {
+        APP.state.fileQueue = APP.state.fileQueue.filter(f => f.status !== 'done' && f.status !== 'error');
+        APP.state.sendDoneCount = APP.state.fileQueue.filter(f => f.status === 'done').length;
+        updateFileUI();
+    });
+
+    updateFileUI();
+})();
+// ========== Chat Room ==========
+function sendChatMessage() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text) return;
+    if (!APP.state.connected) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
+    input.value = '';
+    const msg = {type: 'chat', text: text, from: APP.state.displayName, timestamp: Date.now()};
+    broadcastToPeers(JSON.stringify(msg));
+    appendChatMessage(APP.state.displayName, text, msg.timestamp);
+}
+
+function appendChatMessage(from, text, timestamp) {
+    const container = document.getElementById('chatMessages');
+    const isSelf = from === APP.state.displayName;
+    const side = isSelf ? 'self' : 'other';
+    const timeStr = new Date(timestamp).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + side;
+    div.innerHTML = '<div class="msg-sender">' + escapeHtml(from) + '</div>'
+        + '<div class="msg-text">' + escapeHtml(text) + '</div>'
+        + '<div class="msg-time">' + timeStr + '</div>';
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    // Limit to 200 messages
+    while (container.children.length > 200) {
+        container.removeChild(container.firstChild);
+    }
+}
+
+function appendSystemMessage(text) {
+    const container = document.getElementById('chatMessages');
+    const timeStr = new Date().toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const div = document.createElement('div');
+    div.className = 'chat-msg other';
+    div.style.alignSelf = 'center';
+    div.style.maxWidth = '100%';
+    div.style.textAlign = 'center';
+    div.style.background = 'transparent';
+    div.style.color = '#94a3b8';
+    div.style.fontSize = '12px';
+    div.innerHTML = '<div class="msg-sender">系統</div>'
+        + '<div class="msg-text">' + escapeHtml(text) + '</div>'
+        + '<div class="msg-time">' + timeStr + '</div>';
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+// --- Wire up chat UI ---
+document.getElementById('btnChatSend').addEventListener('click', sendChatMessage);
+document.getElementById('chatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendChatMessage();
+});
+</script>
+</body>
+</html>
