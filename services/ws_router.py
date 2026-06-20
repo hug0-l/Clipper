@@ -137,83 +137,45 @@ async def h_webrtc_signal(websocket, data, ctx):
 @register("chat-backup")
 async def h_chat_backup(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
-    backup_msg = {
-        "msgId": data.get("msgId", ""),
-        "text": data.get("text", ""),
-        "from": data.get("from", ""),
-        "timestamp": data.get("timestamp", time.time() * 1000),
-        "serverReceivedAt": time.time() * 1000,
-    }
-    ctx["room_data"][rid]["chatMessages"].append(backup_msg)
-    retention = ctx["config"].get("chatRetentionDays", 7)
-    cutoff = (time.time() - retention * 86400) * 1000
-    ctx["room_data"][rid]["chatMessages"] = [
-        m for m in ctx["room_data"][rid]["chatMessages"]
-        if _ts_val(m["timestamp"]) > cutoff
-    ]
-    ctx["save_state"]()
-    ctx["log"]('CHAT-BACKUP', f'{my_peer_id} backed up chat msg in {rid} ({len(ctx["room_data"][rid]["chatMessages"])} stored)')
+    cs = ctx["chat_service"]
+    cs.backup_message(ctx["room_data"][rid], rid, data, ctx["log"])
 
 
 @register("chat-edit")
 async def h_chat_edit(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
-    target_msg_id = data.get("msgId")
+    cs = ctx["chat_service"]
+    msg_id = data.get("msgId")
     new_text = data.get("text", "")
-    found = False
-    for msg in ctx["room_data"][rid].get("chatMessages", []):
-        if msg.get("msgId") == target_msg_id:
-            msg["text"] = new_text
-            msg["edited"] = True
-            found = True
-            break
-    if not found:
-        await websocket.send(json.dumps({"type": "error", "message": "message not found"}))
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = cs.edit_message(ctx["room_data"][rid], rid, msg_id, new_text, broadcast_fn, ctx["log"])
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
         return
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "chat-edit", "msgId": target_msg_id, "newText": new_text, "edited": True},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
-    ctx["log"]('CHAT-EDIT', f'{my_peer_id} edited msg {target_msg_id} in {rid}')
 
 
 @register("chat-delete")
 async def h_chat_delete(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
-    target_msg_id = data.get("msgId")
-    found = False
-    for msg in ctx["room_data"][rid].get("chatMessages", []):
-        if msg.get("msgId") == target_msg_id:
-            msg["deleted"] = True
-            found = True
-            break
-    if not found:
-        await websocket.send(json.dumps({"type": "error", "message": "message not found"}))
+    cs = ctx["chat_service"]
+    msg_id = data.get("msgId")
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = cs.delete_message(ctx["room_data"][rid], rid, msg_id, broadcast_fn, ctx["log"])
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
         return
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "chat-delete", "msgId": target_msg_id, "deleted": True},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
-    ctx["log"]('CHAT-DELETE', f'{my_peer_id} deleted msg {target_msg_id} in {rid}')
 
 
 @register("notice-create")
@@ -224,15 +186,13 @@ async def h_notice_create(websocket, data, ctx):
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
+    ns = ctx["notice_service"]
     post = data.get("post", {})
-    ctx["room_data"][rid]["noticePosts"].append(post)
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "notice-create", "post": post},
-        exclude=websocket,
-    )
-    ctx["log"]('NOTICE', f'{my_peer_id} created post in {rid}')
-    ctx["save_state"]()
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = ns.create_post(ctx["room_data"][rid], rid, post, broadcast_fn, ctx["log"])
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("notice-edit")
@@ -242,38 +202,12 @@ async def h_notice_edit(websocket, data, ctx):
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
-    post_id = data.get("id")
-    for post in ctx["room_data"][rid]["noticePosts"]:
-        if post.get("id") == post_id:
-            post["title"] = data.get("title", post.get("title", ""))
-            post["content"] = data.get("content", post.get("content", ""))
-            post["editedAt"] = data.get("editedAt", time.time() * 1000)
-            if "category" in data:
-                post["category"] = data["category"]
-            if "tags" in data:
-                post["tags"] = data["tags"]
-            if "color" in data:
-                post["color"] = data["color"]
-            break
-    broadcast_msg = {
-        "type": "notice-edit",
-        "id": post_id,
-        "title": data.get("title"),
-        "content": data.get("content"),
-        "editedAt": data.get("editedAt"),
-    }
-    if "category" in data:
-        broadcast_msg["category"] = data["category"]
-    if "tags" in data:
-        broadcast_msg["tags"] = data["tags"]
-    if "color" in data:
-        broadcast_msg["color"] = data["color"]
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        broadcast_msg,
-        exclude=websocket,
-    )
-    ctx["save_state"]()
+    ns = ctx["notice_service"]
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = ns.edit_post(ctx["room_data"][rid], rid, data, broadcast_fn)
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("notice-delete")
@@ -283,18 +217,13 @@ async def h_notice_delete(websocket, data, ctx):
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
+    ns = ctx["notice_service"]
     del_id = data.get("id")
-    ctx["room_data"][rid]["noticePosts"] = [
-        p for p in ctx["room_data"][rid]["noticePosts"] if p.get("id") != del_id
-    ]
-    if del_id and del_id not in ctx["room_data"][rid]["deletedPostIds"]:
-        ctx["room_data"][rid]["deletedPostIds"].append(del_id)
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "notice-delete", "id": del_id},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = ns.delete_post(ctx["room_data"][rid], rid, del_id, broadcast_fn, ctx["log"])
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("notice-pin")
@@ -304,18 +233,14 @@ async def h_notice_pin(websocket, data, ctx):
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
+    ns = ctx["notice_service"]
     pin_id = data.get("id")
     pin_val = data.get("pinned", False)
-    for post in ctx["room_data"][rid]["noticePosts"]:
-        if post.get("id") == pin_id:
-            post["pinned"] = pin_val
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "notice-pin", "id": pin_id, "pinned": pin_val},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = ns.toggle_pin(ctx["room_data"][rid], rid, pin_id, pin_val, broadcast_fn)
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("checklistboard-create")
