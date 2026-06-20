@@ -622,6 +622,18 @@ def _generate_peer_id():
             return pid
 
 
+def _ts_val(v):
+    """Convert timestamp (epoch ms number or ISO string) to float (epoch ms)."""
+    if v is None:
+        return 0.0
+    if isinstance(v, str):
+        try:
+            return float(v)
+        except ValueError:
+            # ISO format: "2026-06-20T05:00:00.000Z"
+            return datetime.fromisoformat(v.replace('Z','+00:00')).timestamp() * 1000
+    return float(v)
+
 async def handler(websocket):
     """Handle a WebSocket connection."""
     room_id = None
@@ -758,7 +770,7 @@ async def handler(websocket):
                 cutoff = (time.time() - retention * 86400) * 1000
                 room_data[rid]["chatMessages"] = [
                     m for m in room_data[rid]["chatMessages"]
-                    if float(m["timestamp"]) > cutoff
+                    if _ts_val(m["timestamp"]) > cutoff
                 ]
                 _save_state()
                 _log('CHAT-BACKUP', f'{my_peer_id} backed up chat msg in {rid} ({len(room_data[rid]["chatMessages"])} stored)')
@@ -1083,13 +1095,13 @@ async def handler(websocket):
                     cutoff = (time.time() - retention * 86400) * 1000
                     filtered = [
                         m for m in room_data[rid].get("chatMessages", [])
-                        if float(m["timestamp"]) > cutoff
+                        if _ts_val(m["timestamp"]) > cutoff
                     ]
                 else:
-                    since_f = float(since) if since is not None else 0
+                    since_f = _ts_val(since) if since is not None else 0
                     filtered = [
                         m for m in room_data[rid].get("chatMessages", [])
-                        if float(m["timestamp"]) > since_f
+                        if _ts_val(m["timestamp"]) > since_f
                     ]
                 await websocket.send(json.dumps({
                     "type": "chat-history-result",
