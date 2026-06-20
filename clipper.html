@@ -1858,6 +1858,8 @@ diagnosticModule.mount(document.createElement('div'));
 // Create module instances for backward compat with legacy code
 const chatModule = new ChatModule(wsBus, wsManager);
 window.chatModule = chatModule;
+const filesModule = new FilesModule(wsBus, wsManager);
+window.filesModule = filesModule;
 const noticeModule = new NoticeModule(wsBus, wsManager);
 window.noticeModule = noticeModule;
 const checklistModule = new ChecklistModule(wsBus, wsManager);
@@ -1866,6 +1868,7 @@ const keymgmtModule = new KeyMgmtModule(wsBus, wsManager);
 window.keymgmtModule = keymgmtModule;
 // Mount modules (they self-register WS handlers + wire events)
 chatModule.mount(document.getElementById('chatPanel') || document.createElement('div'));
+filesModule.mount(document.createElement('div'));
 noticeModule.mount(document.createElement('div'));
 checklistModule.mount(document.createElement('div'));
 keymgmtModule.mount(document.createElement('div'));
@@ -2311,88 +2314,17 @@ function handleWsMessage(data) {
             break;
 
         case 'relay-data':
-            // Incoming relayed message from another peer via server
-            if (data.data && data.data.type === 'chat') {
-                appendChatMessage(data.data.from, data.data.text, data.data.timestamp, data.data.msgId, data.data.replyTo);
-                // Also ack via relay if we got the msgId
-                if (data.data.msgId && (APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) && APP.state.room) {
-                    sendWsMessage({type: 'relay-data', room: APP.state.room, to: data.from, data: {type: 'ack', msgId: data.data.msgId}});
-                }
-            } else if (data.data && data.data.type === 'file-meta') {
-                handleFileMeta(data.data, data.from);
-            } else if (data.data && data.data.type === 'file-done') {
-                handleFileDone(data.data, data.from);
-            } else if (data.data && data.data.type === 'ack') {
-                // ack via relay — mark delivered
-                const ackPeer = data.from;
-                if (data.data.msgId) {
-                    const entry = APP.state.sentMessages.get(data.data.msgId);
-                    if (entry) {
-                        entry.acks.add(ackPeer);
-                        updateMsgTick(entry, data.data.msgId);
-                    }
-                }
-            } else if (data.data && data.data.type === 'typing') {
-                // Show typing indicator
-                const typingEl = document.getElementById('typingIndicator');
-                if (typingEl) {
-                    typingEl.textContent = '👤 ' + (data.data.from || '某人') + ' 正在輸入⋯';
-                    typingEl.style.display = '';
-                    clearTimeout(typingEl._hideTimer);
-                    typingEl._hideTimer = setTimeout(() => { typingEl.style.display = 'none'; }, 3000);
-                }
-            } else if (data.data && data.data.type === 'typing-stop') {
-                const typingEl = document.getElementById('typingIndicator');
-                if (typingEl) {
-                    typingEl.style.display = 'none';
-                    clearTimeout(typingEl._hideTimer);
-                }
-            } else if (data.data && data.data.type === 'chat-edit') {
-                const el = document.querySelector('[data-msgid="' + data.data.msgId + '"]');
-                if (el) {
-                    const textDiv = el.querySelector('.msg-text');
-                    if (textDiv) {
-                        textDiv.textContent = data.data.newText;
-                        let editedLabel = el.querySelector('.msg-edited');
-                        if (!editedLabel) {
-                            editedLabel = document.createElement('span');
-                            editedLabel.className = 'msg-edited';
-                            el.querySelector('.msg-time')?.appendChild(editedLabel);
-                        }
-                        editedLabel.textContent = ' (已編輯)';
-                    }
-                }
-            } else if (data.data && data.data.type === 'chat-delete') {
-                const el = document.querySelector('[data-msgid="' + data.data.msgId + '"]');
-                if (el) {
-                    el.classList.add('deleted');
-                    el.innerHTML = '<div class="msg-text" style="text-align:center;font-style:italic;color:#64748b;">此訊息已刪除</div>';
-                    el.querySelectorAll('.chat-msg-actions').forEach(a => a.remove());
-                }
-            }
-            // Mark this peer as relay mode
+            // Handled by ChatModule/FilesModule via wsManager.onMessage
             const relayPeer = APP.state.peers.get(data.from);
             if (relayPeer) relayPeer.relay = true;
-            updateTransportUI();
+            if (typeof updateTransportUI === 'function') updateTransportUI();
             break;
 
         case 'relay-chunk':
-            // Incoming relayed file chunk (base64) via server
-            {
-                const fromPid = data.from;
-                const fileId = data.fileId;
-                const chunkBase64 = data.chunk;
-                // Convert base64 to ArrayBuffer
-                const binaryStr = atob(chunkBase64);
-                const bytes = new Uint8Array(binaryStr.length);
-                for (let i = 0; i < binaryStr.length; i++) {
-                    bytes[i] = binaryStr.charCodeAt(i);
-                }
-                handleFileChunk(bytes.buffer, fromPid);
-                const relayPeer2 = APP.state.peers.get(fromPid);
-                if (relayPeer2) relayPeer2.relay = true;
-                updateTransportUI();
-            }
+            // Handled by FilesModule via wsManager.onMessage
+            const relayPeer2 = APP.state.peers.get(data.from);
+            if (relayPeer2) relayPeer2.relay = true;
+            if (typeof updateTransportUI === 'function') updateTransportUI();
             break;
 
         case 'room_peers':
@@ -2792,26 +2724,35 @@ function setupDataChannel(dc, peerId) {
                         // Handled via server peer-list now
                         break;
                     case 'chat':
-                        appendChatMessage(msg.from, msg.text, msg.timestamp, msg.msgId, msg.replyTo);
+                        if (window.chatModule && typeof chatModule._appendChatMessage === 'function') {
+                            chatModule._appendChatMessage(msg.from, msg.text, msg.timestamp, msg.msgId, msg.replyTo);
+                        }
                         // Send ack back to sender
                         if (msg.msgId) {
                             try { dc.send(JSON.stringify({type: 'ack', msgId: msg.msgId})); } catch (_) {}
                         }
-                        break;case 'ack':
+                        break;
+                    case 'ack':
                         // Received ack from peer — mark delivered
                         if (msg.msgId) {
                             const entry = APP.state.sentMessages.get(msg.msgId);
                             if (entry) {
                                 entry.acks.add(peerId);
-                                updateMsgTick(entry, msg.msgId);
+                                if (window.chatModule && typeof chatModule._updateMsgTick === 'function') {
+                                    chatModule._updateMsgTick(entry, msg.msgId);
+                                }
                             }
                         }
                         break;
                     case 'file-meta':
-                        handleFileMeta(msg, peerId);
+                        if (window.filesModule && typeof filesModule.handleFileMeta === 'function') {
+                            filesModule.handleFileMeta(msg, peerId);
+                        }
                         break;
                     case 'file-done':
-                        handleFileDone(msg, peerId);
+                        if (window.filesModule && typeof filesModule.handleFileDone === 'function') {
+                            filesModule.handleFileDone(msg, peerId);
+                        }
                         break;
                     case 'sync-request': {
                         const state = {};
