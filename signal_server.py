@@ -572,6 +572,19 @@ async def _mini_http(reader, writer):
                             response_data, status_code = {"error": "invalid password", "success": False}, 401
                     except json.JSONDecodeError:
                         response_data, status_code = {"error": "invalid JSON"}, 400
+                elif rest_path == "client-log" and method == "POST":
+                    entries = json.loads(body)
+                    if isinstance(entries, dict) and 'entries' in entries:
+                        entries = entries['entries']
+                    if isinstance(entries, list):
+                        for entry in entries:
+                            ts = entry.get('ts', datetime.now(timezone.utc).isoformat())
+                            level = entry.get('level', 'log')
+                            msg = entry.get('msg', '')
+                            _log(f'CLIENT-{level.upper()}', f'{msg}')
+                        response_data, status_code = {"status": "ok", "count": len(entries)}, 200
+                    else:
+                        response_data, status_code = {"error": "expected list"}, 400
                 elif rest_path.startswith("rooms/"):
                     sub = rest_path[len("rooms/"):]
                     slash_idx = sub.find("/")

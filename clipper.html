@@ -1674,6 +1674,32 @@ function _clientLog(level, args) {
         _clientLogs = _clientLogs.slice(-CLIENT_LOG_MAX);
     }
 }
+// ========== Client Log Upload ==========
+let _clientLogUploadTimer = null;
+const CLIENT_LOG_UPLOAD_INTERVAL = 15000;  // 15 seconds
+
+function _uploadClientLogs() {
+    if (_clientLogs.length === 0) return;
+    const batch = _clientLogs.splice(0, Math.min(100, _clientLogs.length));
+    const payload = batch.map(e => ({
+        ts: new Date(e.ts).toISOString(),
+        level: e.level,
+        msg: e.msg
+    }));
+    const serverUrl = window.location.origin || 'http://localhost:8766';
+    fetch(serverUrl + '/api/client-log', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({entries: payload})
+    }).catch(() => {
+        _clientLogs.unshift(...batch);
+        if (_clientLogs.length > 5000) _clientLogs = _clientLogs.slice(-5000);
+    });
+}
+
+if (!_clientLogUploadTimer) {
+    _clientLogUploadTimer = setInterval(_uploadClientLogs, CLIENT_LOG_UPLOAD_INTERVAL);
+}
 
 // Intercept console.log/error/warn
 (function() {
