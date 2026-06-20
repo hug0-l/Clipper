@@ -2793,7 +2793,7 @@ function handleWsMessage(data) {
             }
             break;
 
-        case 'relay-data':case 'relay-data':
+        case 'relay-data':
             // Incoming relayed message from another peer via server
             if (data.data && data.data.type === 'chat') {
                 appendChatMessage(data.data.from, data.data.text, data.data.timestamp, data.data.msgId, data.data.replyTo);
@@ -3567,7 +3567,7 @@ setInterval(() => {
     }
 }, 5000);
 // ========== Load Persisted Messages ==========
-const savedMessages = loadFromStorage('vcc_chat_messages', []);const savedMessages = loadFromStorage('vcc_chat_messages', []);
+const savedMessages = loadFromStorage('vcc_chat_messages', []);
 APP.state.persistedChatMessages = savedMessages;
 for (const msg of savedMessages) {
     renderChatMessage(msg.from, msg.text, msg.timestamp, msg.msgId, msg.replyTo);
@@ -5127,7 +5127,6 @@ async function deleteChatMessage(msgId) {
     broadcastToPeers(JSON.stringify({type: 'chat-delete', msgId}));
     APP.showStatusMsg('✅ 訊息已刪除');
 }
-});
 
 // ========== Notice Board Init ==========
 APP.state.noticePosts = loadFromStorage(APP.roomKey('vcc_notice_posts'), []);
