@@ -2793,7 +2793,7 @@ function handleWsMessage(data) {
             }
             break;
 
-        case 'relay-data':
+        case 'relay-data':case 'relay-data':
             // Incoming relayed message from another peer via server
             if (data.data && data.data.type === 'chat') {
                 appendChatMessage(data.data.from, data.data.text, data.data.timestamp, data.data.msgId, data.data.replyTo);
@@ -2821,7 +2821,6 @@ function handleWsMessage(data) {
                 if (typingEl) {
                     typingEl.textContent = '👤 ' + (data.data.from || '某人') + ' 正在輸入⋯';
                     typingEl.style.display = '';
-                    // Auto-hide after 3 seconds
                     clearTimeout(typingEl._hideTimer);
                     typingEl._hideTimer = setTimeout(() => { typingEl.style.display = 'none'; }, 3000);
                 }
@@ -2837,7 +2836,6 @@ function handleWsMessage(data) {
                     const textDiv = el.querySelector('.msg-text');
                     if (textDiv) {
                         textDiv.textContent = data.data.newText;
-                        // Add/update edited label
                         let editedLabel = el.querySelector('.msg-edited');
                         if (!editedLabel) {
                             editedLabel = document.createElement('span');
@@ -2854,7 +2852,14 @@ function handleWsMessage(data) {
                     el.innerHTML = '<div class="msg-text" style="text-align:center;font-style:italic;color:#64748b;">此訊息已刪除</div>';
                     el.querySelectorAll('.chat-msg-actions').forEach(a => a.remove());
                 }
-            }case 'relay-chunk':
+            }
+            // Mark this peer as relay mode
+            const relayPeer = APP.state.peers.get(data.from);
+            if (relayPeer) relayPeer.relay = true;
+            updateTransportUI();
+            break;
+
+        case 'relay-chunk':
             // Incoming relayed file chunk (base64) via server
             {
                 const fromPid = data.from;
