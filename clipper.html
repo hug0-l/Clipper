@@ -496,7 +496,38 @@ footer input[type="text"] {
 .chat-msg .msg-time { font-size:12px; opacity:0.5; text-align:right; margin-top:2px; display:flex; align-items:center; justify-content:flex-end; gap:4px; }
 .msg-tick { font-size:11px; font-weight:600; }
 .msg-tick.sent { color:#94a3b8; }
-.msg-tick.delivered { color:#38bdf8; }
+.msg-tick.delivered { color:#38bdf8; }.msg-tick.delivered { color:#38bdf8; }
+/* Chat search */
+.chat-search { padding:4px 0; }
+.chat-search-input { width:100%; background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:6px 10px; border-radius:6px; font-size:15px; outline:none; font-family:inherit; box-sizing:border-box; }
+.chat-search-input:focus { border-color:#38bdf8; }
+.chat-search-input::placeholder { color:#64748b; }
+/* Reply bar */
+.reply-bar { display:flex; align-items:center; gap:8px; padding:6px 12px; background:#1e293b; border-radius:6px; margin-bottom:4px; font-size:14px; }
+.reply-bar .reply-text { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#94a3b8; }
+.reply-bar .reply-close { cursor:pointer; color:#64748b; font-size:16px; padding:0 4px; border-radius:4px; }
+.reply-bar .reply-close:hover { color:#ef4444; background:rgba(239,68,68,0.1); }
+/* Typing indicator */
+.typing-indicator { font-size:13px; color:#64748b; font-style:italic; padding:2px 12px; min-height:20px; }
+/* Message actions */
+.chat-msg { position:relative; }
+.chat-msg-actions { position:absolute; top:2px; right:4px; display:none; gap:2px; }
+.chat-msg:hover .chat-msg-actions { display:flex; }
+.chat-msg-btn { background:transparent; border:none; color:#94a3b8; cursor:pointer; font-size:14px; padding:2px 6px; border-radius:4px; font-family:inherit; line-height:1.2; transition:background 0.1s,color 0.1s; }
+.chat-msg-btn:hover { color:#e2e8f0; background:rgba(255,255,255,0.08); }
+.chat-msg-menu { position:absolute; top:26px; right:4px; background:#1e293b; border:1px solid #334155; border-radius:8px; padding:4px 0; box-shadow:0 4px 16px rgba(0,0,0,0.4); z-index:100; min-width:90px; display:none; }
+.chat-msg-menu.show { display:block; }
+.chat-msg-menu-item { padding:6px 14px; cursor:pointer; font-size:13px; color:#e2e8f0; transition:background 0.1s; white-space:nowrap; }
+.chat-msg-menu-item:hover { background:#334155; }
+.chat-msg-menu-item.danger { color:#ef4444; }
+/* Reply quote block */
+.msg-quote { border-left:3px solid #475569; padding:4px 8px; margin-bottom:4px; font-size:13px; color:#94a3b8; background:rgba(255,255,255,0.03); border-radius:0 4px 4px 0; line-height:1.3; }
+.msg-quote .quote-from { font-size:11px; color:#64748b; margin-bottom:1px; }
+.msg-quote .quote-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Edited label */
+.msg-edited { font-size:11px; color:#64748b; font-style:italic; }
+/* Deleted message */
+.chat-msg.deleted { opacity:0.5; font-style:italic; color:#64748b; text-align:center; }
 .chat-input-bar { display:flex; gap:8px; }
 .chat-input-bar input { flex:1; background:#1e293b; border:1px solid #334155; color:#e2e8f0; padding:10px 14px; border-radius:8px; font-size:18px; outline:none; }
 .chat-input-bar input:focus { border-color:#38bdf8; }
@@ -1083,17 +1114,24 @@ footer input[type="text"] {
     <div id="popupContainer"></div>
     <section class="tab-pane active" data-tab="clipboard">
         <div class="chat-container" id="chatContainer">
+            <div class="chat-search" id="chatSearchContainer">
+                <input type="text" id="chatSearch" class="chat-search-input" placeholder="🔍 搜尋聊天訊息...">
+            </div>
             <div class="chat-messages" id="chatMessages"></div>
+            <div id="replyBar" class="reply-bar" style="display:none;">
+                <span class="reply-text" id="replyText">回覆</span>
+                <span class="reply-close" id="replyClose">✕</span>
+            </div>
             <div class="chat-input-bar">
                 <input type="text" id="chatInput" placeholder="輸入訊息，Enter 發送...">
                 <button class="btn btn-primary" id="btnChatSend">發送</button>
             </div>
+            <div id="typingIndicator" class="typing-indicator" style="display:none;"></div>
             <div class="chat-clear-bar">
                 <button class="btn btn-secondary" id="btnClearChat">🗑 清除本機紀錄</button>
             </div>
         </div>
-    </section>
-    <section class="tab-pane" data-tab="filetransfer">
+    </section><section class="tab-pane" data-tab="filetransfer">
         <div class="file-transfer-container">
             <div class="file-drop-zone" id="fileDropZone">
                 <div class="drop-zone-icon">📁</div>
@@ -2758,7 +2796,7 @@ function handleWsMessage(data) {
         case 'relay-data':
             // Incoming relayed message from another peer via server
             if (data.data && data.data.type === 'chat') {
-                appendChatMessage(data.data.from, data.data.text, data.data.timestamp);
+                appendChatMessage(data.data.from, data.data.text, data.data.timestamp, data.data.msgId, data.data.replyTo);
                 // Also ack via relay if we got the msgId
                 if (data.data.msgId && (APP.state.ws && APP.state.ws.readyState === WebSocket.OPEN) && APP.state.room) {
                     sendWsMessage({type: 'relay-data', room: APP.state.room, to: data.from, data: {type: 'ack', msgId: data.data.msgId}});
@@ -2777,14 +2815,46 @@ function handleWsMessage(data) {
                         updateMsgTick(entry, data.data.msgId);
                     }
                 }
-            }
-            // Mark this peer as relay mode
-            const relayPeer = APP.state.peers.get(data.from);
-            if (relayPeer) relayPeer.relay = true;
-            updateTransportUI();
-            break;
-
-        case 'relay-chunk':
+            } else if (data.data && data.data.type === 'typing') {
+                // Show typing indicator
+                const typingEl = document.getElementById('typingIndicator');
+                if (typingEl) {
+                    typingEl.textContent = '👤 ' + (data.data.from || '某人') + ' 正在輸入⋯';
+                    typingEl.style.display = '';
+                    // Auto-hide after 3 seconds
+                    clearTimeout(typingEl._hideTimer);
+                    typingEl._hideTimer = setTimeout(() => { typingEl.style.display = 'none'; }, 3000);
+                }
+            } else if (data.data && data.data.type === 'typing-stop') {
+                const typingEl = document.getElementById('typingIndicator');
+                if (typingEl) {
+                    typingEl.style.display = 'none';
+                    clearTimeout(typingEl._hideTimer);
+                }
+            } else if (data.data && data.data.type === 'chat-edit') {
+                const el = document.querySelector('[data-msgid="' + data.data.msgId + '"]');
+                if (el) {
+                    const textDiv = el.querySelector('.msg-text');
+                    if (textDiv) {
+                        textDiv.textContent = data.data.newText;
+                        // Add/update edited label
+                        let editedLabel = el.querySelector('.msg-edited');
+                        if (!editedLabel) {
+                            editedLabel = document.createElement('span');
+                            editedLabel.className = 'msg-edited';
+                            el.querySelector('.msg-time')?.appendChild(editedLabel);
+                        }
+                        editedLabel.textContent = ' (已編輯)';
+                    }
+                }
+            } else if (data.data && data.data.type === 'chat-delete') {
+                const el = document.querySelector('[data-msgid="' + data.data.msgId + '"]');
+                if (el) {
+                    el.classList.add('deleted');
+                    el.innerHTML = '<div class="msg-text" style="text-align:center;font-style:italic;color:#64748b;">此訊息已刪除</div>';
+                    el.querySelectorAll('.chat-msg-actions').forEach(a => a.remove());
+                }
+            }case 'relay-chunk':
             // Incoming relayed file chunk (base64) via server
             {
                 const fromPid = data.from;
@@ -3198,13 +3268,12 @@ function setupDataChannel(dc, peerId) {
                         // Handled via server peer-list now
                         break;
                     case 'chat':
-                        appendChatMessage(msg.from, msg.text, msg.timestamp);
+                        appendChatMessage(msg.from, msg.text, msg.timestamp, msg.msgId, msg.replyTo);
                         // Send ack back to sender
                         if (msg.msgId) {
                             try { dc.send(JSON.stringify({type: 'ack', msgId: msg.msgId})); } catch (_) {}
                         }
-                        break;
-                    case 'ack':
+                        break;case 'ack':
                         // Received ack from peer — mark delivered
                         if (msg.msgId) {
                             const entry = APP.state.sentMessages.get(msg.msgId);
@@ -3233,6 +3302,51 @@ function setupDataChannel(dc, peerId) {
                         break;
                     }
                     case 'sync-state':
+                        for (const fn of APP.state.syncConsumers) {
+                            fn(msg);
+                        }
+                        break;
+                    case 'chat-edit':
+                        {
+                            const el = document.querySelector('[data-msgid="' + msg.msgId + '"]');
+                            if (el) {
+                                const textDiv = el.querySelector('.msg-text');
+                                if (textDiv) {
+                                    textDiv.textContent = msg.newText;
+                                    let editedLabel = el.querySelector('.msg-edited');
+                                    if (!editedLabel) {
+                                        editedLabel = document.createElement('span');
+                                        editedLabel.className = 'msg-edited';
+                                        el.querySelector('.msg-time')?.appendChild(editedLabel);
+                                    }
+                                    editedLabel.textContent = ' (已編輯)';
+                                }
+                            }
+                        }
+                        break;
+                    case 'chat-delete':
+                        {
+                            const el = document.querySelector('[data-msgid="' + msg.msgId + '"]');
+                            if (el) {
+                                el.classList.add('deleted');
+                                el.innerHTML = '<div class="msg-text" style="text-align:center;font-style:italic;color:#64748b;">此訊息已刪除</div>';
+                                el.querySelectorAll('.chat-msg-actions').forEach(a => a.remove());
+                            }
+                        }
+                        break;
+                    case 'typing':
+                    case 'typing-stop':
+                        // Handled via relay-data handler; silent in DC to avoid console noise
+                        break;
+                        {
+                            const el = document.querySelector('[data-msgid="' + msg.msgId + '"]');
+                            if (el) {
+                                el.classList.add('deleted');
+                                el.innerHTML = '<div class="msg-text" style="text-align:center;font-style:italic;color:#64748b;">此訊息已刪除</div>';
+                                el.querySelectorAll('.chat-msg-actions').forEach(a => a.remove());
+                            }
+                        }
+                        break;
                         for (const fn of APP.state.syncConsumers) {
                             fn(msg);
                         }
@@ -3448,12 +3562,11 @@ setInterval(() => {
     }
 }, 5000);
 // ========== Load Persisted Messages ==========
-const savedMessages = loadFromStorage('vcc_chat_messages', []);
+const savedMessages = loadFromStorage('vcc_chat_messages', []);const savedMessages = loadFromStorage('vcc_chat_messages', []);
 APP.state.persistedChatMessages = savedMessages;
 for (const msg of savedMessages) {
-    renderChatMessage(msg.from, msg.text, msg.timestamp);
-}
-// Scroll to bottom after initial load + lock-to-bottom behavior
+    renderChatMessage(msg.from, msg.text, msg.timestamp, msg.msgId, msg.replyTo);
+}// Scroll to bottom after initial load + lock-to-bottom behavior
 requestAnimationFrame(() => {
     const cm = document.getElementById('chatMessages');
     if (cm) cm.scrollTop = cm.scrollHeight;
@@ -4683,7 +4796,16 @@ function sendChatMessage() {
     const timestamp = Date.now();
     const msgId = crypto.randomUUID().slice(0, 8);
     const peerCount = APP.state.peers.size || 1;
+    const replyTo = APP.state._pendingReply || null;
     const msg = {type: 'chat', msgId, text, from: APP.state.displayName, timestamp};
+    if (replyTo) {
+        msg.replyTo = {msgId: replyTo.msgId, text: replyTo.text, from: replyTo.from};
+    }
+
+    // Clear pending reply
+    APP.state._pendingReply = null;
+    const replyBar = document.getElementById('replyBar');
+    if (replyBar) replyBar.style.display = 'none';
 
     // 1. Track delivery status
     APP.state.sentMessages.set(msgId, {
@@ -4692,25 +4814,27 @@ function sendChatMessage() {
 
     // 2. Send via DC (P2P real-time)
     broadcastToPeers(JSON.stringify(msg));
-    renderChatMessage(APP.state.displayName, text, timestamp, msgId);
+    renderChatMessage(APP.state.displayName, text, timestamp, msgId, replyTo);
 
     // 3. Backup to server (fire-and-forget)
     if (APP.state.room) {
-        sendWsMessage({type: 'chat-backup', room: APP.state.room, text, from: APP.state.displayName, timestamp});
+        const backupMsg = {type: 'chat-backup', room: APP.state.room, text, from: APP.state.displayName, timestamp};
+        if (replyTo) backupMsg.replyTo = replyTo;
+        sendWsMessage(backupMsg);
     }
 }
 
-function appendChatMessage(from, text, timestamp) {
+function appendChatMessage(from, text, timestamp, msgId, replyTo) {
     // Resolve display name for popup display
     const displayFrom = APP.state.peerNames.get(from) || from;
     // Persist with original from value for isSelf matching
-    APP.state.persistedChatMessages.push({from, text, timestamp});
+    APP.state.persistedChatMessages.push({from, text, timestamp, msgId, replyTo});
     saveToStorage('vcc_chat_messages', APP.state.persistedChatMessages.slice(-200));
     if (APP.state.persistedChatMessages.length > 200) {
         APP.state.persistedChatMessages = APP.state.persistedChatMessages.slice(-200);
     }
     // Render DOM
-    renderChatMessage(from, text, timestamp);
+    renderChatMessage(from, text, timestamp, msgId, replyTo);
     // Popup notification for incoming messages from others
     if (from !== APP.state.displayName) {
         const short = text.length > 60 ? text.slice(0, 60) + '…' : text;
@@ -4718,7 +4842,7 @@ function appendChatMessage(from, text, timestamp) {
     }
 }
 
-// Update tick indicator for a sent message
+// Update tick indicator for a sent message// Update tick indicator for a sent message
 function updateMsgTick(entry, msgId) {
     if (!entry) return;
     // Find the msg element by data-msgid
@@ -4744,7 +4868,7 @@ function nameToHue(str) {
     return ((hash % 360) + 360) % 360;
 }
 
-function renderChatMessage(from, text, timestamp, msgId) {
+function renderChatMessage(from, text, timestamp, msgId, replyTo) {
     // System messages get low-visibility treatment
     const container = document.getElementById('chatMessages');
     if (from === '系統') {
@@ -4763,21 +4887,94 @@ function renderChatMessage(from, text, timestamp, msgId) {
     const div = document.createElement('div');
     div.className = 'chat-msg ' + side;
     if (msgId) div.dataset.msgid = msgId;
+
+    // Build inner content
+    let innerHtml = '';
+
+    // Reply quote block
+    if (replyTo) {
+        const replyFrom = APP.state.peerNames.get(replyTo.from) || replyTo.from;
+        innerHtml += '<div class="msg-quote"><div class="quote-from">↩ ' + escapeHtml(replyFrom) + '</div><div class="quote-text">' + escapeHtml(replyTo.text) + '</div></div>';
+    }
+
     if (!isSelf) {
         const hue = nameToHue(from);
         const color = 'hsl(' + hue + ', 70%, 65%)';
         div.style.borderLeftColor = color;
-        div.innerHTML = '<div class="msg-sender" style="color:' + color + '">' + escapeHtml(displayFrom) + '</div>'
+        innerHtml += '<div class="msg-sender" style="color:' + color + '">' + escapeHtml(displayFrom) + '</div>'
             + '<div class="msg-text">' + escapeHtml(text) + '</div>'
             + '<div class="msg-time">' + timeStr + '</div>';
     } else {
         const entry = msgId ? APP.state.sentMessages.get(msgId) : null;
         const tick = entry ? '<span class="msg-tick' + (entry.acks.size >= entry.totalPeers ? ' delivered' : ' sent') + '">' + (entry.acks.size >= entry.totalPeers ? '✓✓' : '✓') + '</span>' : '';
-        div.innerHTML = '<div class="msg-sender">' + escapeHtml(displayFrom) + '</div>'
+        innerHtml += '<div class="msg-sender">' + escapeHtml(displayFrom) + '</div>'
             + '<div class="msg-text">' + escapeHtml(text) + '</div>'
             + '<div class="msg-time">' + timeStr + ' ' + tick + '</div>';
     }
+
+    // Action buttons (for all messages)
+    innerHtml += '<div class="chat-msg-actions">'
+        + '<button class="chat-msg-btn" data-action="reply" title="回覆">↩</button>'
+        + '<button class="chat-msg-btn" data-action="menu" title="更多">⋯</button>'
+        + '<div class="chat-msg-menu" data-menu-for="' + (msgId || '') + '">'
+        + '<div class="chat-msg-menu-item" data-action="edit-msg">✏️ 編輯</div>'
+        + '<div class="chat-msg-menu-item danger" data-action="delete-msg">🗑 刪除</div>'
+        + '</div></div>';
+
+    div.innerHTML = innerHtml;
     container.appendChild(div);
+
+    // Wire up action buttons
+    const actionsDiv = div.querySelector('.chat-msg-actions');
+    if (actionsDiv && msgId) {
+        // Reply button
+        actionsDiv.querySelector('[data-action="reply"]')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const senderName = APP.state.peerNames.get(from) || displayFrom;
+            APP.state._pendingReply = {msgId, text, from};
+            const replyBar = document.getElementById('replyBar');
+            const replyText = document.getElementById('replyText');
+            if (replyBar && replyText) {
+                const shortText = text.length > 50 ? text.slice(0, 50) + '…' : text;
+                replyText.textContent = '↩ 回覆 @' + senderName + '：' + shortText;
+                replyBar.style.display = 'flex';
+            }
+            document.getElementById('chatInput')?.focus();
+        });
+        // Menu toggle
+        actionsDiv.querySelector('[data-action="menu"]')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const menu = actionsDiv.querySelector('.chat-msg-menu');
+            if (menu) {
+                menu.classList.toggle('show');
+            }
+        });
+        // Edit action
+        actionsDiv.querySelector('[data-action="edit-msg"]')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const menu = actionsDiv.querySelector('.chat-msg-menu');
+            if (menu) menu.classList.remove('show');
+            editChatMessage(msgId);
+        });
+        // Delete action
+        actionsDiv.querySelector('[data-action="delete-msg"]')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const menu = actionsDiv.querySelector('.chat-msg-menu');
+            if (menu) menu.classList.remove('show');
+            deleteChatMessage(msgId);
+        });
+    }
+
+    // Close menus on outside click
+    if (!div._menuClickListener) {
+        div._menuClickListener = function(e) {
+            if (!e.target.closest('.chat-msg-menu') && !e.target.closest('[data-action="menu"]')) {
+                div.querySelectorAll('.chat-msg-menu.show').forEach(m => m.classList.remove('show'));
+            }
+        };
+        document.addEventListener('click', div._menuClickListener);
+    }
+
     if (APP.state._chatLockedToBottom) container.scrollTop = container.scrollHeight;
     // Limit to 200 messages
     while (container.children.length > 200) {
@@ -4813,7 +5010,118 @@ document.getElementById('btnClearChat').addEventListener('click', async () => {
     APP.state.persistedChatMessages = [];
     saveToStorage('vcc_chat_messages', []);
     document.getElementById('chatMessages').innerHTML = '';
-    APP.showStatusMsg('本機聊天紀錄已清除');
+    APP.showStatusMsg('本機聊天紀錄已清除');});
+
+// ========== Chat Search ==========
+function searchChat(query) {
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+    const msgs = container.querySelectorAll('.chat-msg');
+    if (!query || !query.trim()) {
+        msgs.forEach(el => el.style.display = '');
+        return;
+    }
+    const q = query.trim().toLowerCase();
+    msgs.forEach(el => {
+        const text = (el.textContent || '').toLowerCase();
+        el.style.display = text.includes(q) ? '' : 'none';
+    });
+}
+document.getElementById('chatSearch')?.addEventListener('input', function() {
+    searchChat(this.value);
+});
+document.getElementById('chatSearch')?.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') searchChat(this.value);
+});
+
+// ========== Reply Close ==========
+document.getElementById('replyClose')?.addEventListener('click', () => {
+    APP.state._pendingReply = null;
+    document.getElementById('replyBar').style.display = 'none';
+});
+
+// ========== Typing Indicator ==========
+let _typingTimer = null;
+let _typingStopTimer = null;
+
+document.getElementById('chatInput')?.addEventListener('input', function() {
+    if (!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN || !APP.state.room) return;
+    // Debounce typing signal
+    if (_typingTimer) clearTimeout(_typingTimer);
+    if (_typingStopTimer) clearTimeout(_typingStopTimer);
+    _typingTimer = setTimeout(() => {
+        broadcastToPeers(JSON.stringify({type: 'typing', from: APP.state.displayName}));
+        _typingTimer = null;
+        // Auto-send typing-stop after 2 seconds of no input
+        _typingStopTimer = setTimeout(() => {
+            broadcastToPeers(JSON.stringify({type: 'typing-stop'}));
+            _typingStopTimer = null;
+        }, 2000);
+    }, 300);
+});
+
+// Clear typing state on send
+const _origSendChatMessage = sendChatMessage;
+sendChatMessage = function() {
+    if (_typingTimer) { clearTimeout(_typingTimer); _typingTimer = null; }
+    if (_typingStopTimer) { clearTimeout(_typingStopTimer); _typingStopTimer = null; }
+    broadcastToPeers(JSON.stringify({type: 'typing-stop'}));
+    _origSendChatMessage.call(this);
+};
+
+// ========== Edit & Delete Chat Messages ==========
+function editChatMessage(msgId) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
+    if (!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
+    const el = document.querySelector('[data-msgid="' + msgId + '"]');
+    if (!el) return;
+    const textDiv = el.querySelector('.msg-text');
+    if (!textDiv) return;
+    const currentText = textDiv.textContent;
+    // Simple prompt-based edit
+    const newText = prompt('編輯訊息：', currentText);
+    if (newText === null || newText.trim() === '' || newText.trim() === currentText) return;
+    const trimmed = newText.trim();
+    // Update local DOM immediately
+    textDiv.textContent = trimmed;
+    let editedLabel = el.querySelector('.msg-edited');
+    if (!editedLabel) {
+        editedLabel = document.createElement('span');
+        editedLabel.className = 'msg-edited';
+        el.querySelector('.msg-time')?.appendChild(editedLabel);
+    }
+    editedLabel.textContent = ' (已編輯)';
+    // Broadcast edit
+    broadcastToPeers(JSON.stringify({type: 'chat-edit', msgId, newText: trimmed}));
+    APP.showStatusMsg('✅ 訊息已編輯');
+}
+
+async function deleteChatMessage(msgId) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
+    if (!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) {
+        APP.showStatusMsg('❌ 請先建立連線');
+        return;
+    }
+    const confirmed = await showConfirmDialog('確定刪除此訊息？');
+    if (!confirmed) return;
+    const el = document.querySelector('[data-msgid="' + msgId + '"]');
+    if (!el) return;
+    // Update local DOM
+    el.classList.add('deleted');
+    el.innerHTML = '<div class="msg-text" style="text-align:center;font-style:italic;color:#64748b;">此訊息已刪除</div>';
+    // Broadcast delete
+    broadcastToPeers(JSON.stringify({type: 'chat-delete', msgId}));
+    APP.showStatusMsg('✅ 訊息已刪除');
+}
 });
 
 // ========== Notice Board Init ==========
