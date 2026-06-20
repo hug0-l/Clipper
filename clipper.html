@@ -1976,6 +1976,10 @@ function showNoticeForm(post) {
 }
 
 function createNoticePost(title, content, category, tagsString) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
@@ -2002,6 +2006,10 @@ function createNoticePost(title, content, category, tagsString) {
 }
 
 function editNoticePost(id, title, content, category, tagsString) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
@@ -2023,6 +2031,10 @@ function editNoticePost(id, title, content, category, tagsString) {
 }
 
 async function deleteNoticePost(id) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const post = APP.state.noticePosts.find(p => p.id === id);
     if (!post) { APP.showStatusMsg('❌ 找不到該公告'); return; }
     let msg = '確定刪除此公告？';
@@ -2038,6 +2050,10 @@ async function deleteNoticePost(id) {
 }
 
 function togglePinNoticePost(id) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const post = APP.state.noticePosts.find(p => p.id === id);
     if (!post) return;
     post.pinned = !post.pinned;
@@ -2206,6 +2222,10 @@ function showKeyProgramForm(entryId) {
 }
 
 function createKeyEntry(label, streamKey, streamUrl, currentProgram) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
@@ -2229,6 +2249,10 @@ function createKeyEntry(label, streamKey, streamUrl, currentProgram) {
 }
 
 function editKeyEntry(id, updates) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
@@ -2244,6 +2268,10 @@ function editKeyEntry(id, updates) {
 }
 
 async function deleteKeyEntry(id) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const entry = APP.state.keyManagements.find(e => e.id === id);
     if (!entry) { APP.showStatusMsg('❌ 找不到該密鑰'); return; }
     if (!await showConfirmDialog('確定刪除密鑰「' + entry.label + '」？')) return;
@@ -2255,6 +2283,10 @@ async function deleteKeyEntry(id) {
 }
 
 function toggleKeyActive(id) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const entry = APP.state.keyManagements.find(e => e.id === id);
     if (!entry) return;
     entry.isActive = !entry.isActive;
@@ -2266,6 +2298,10 @@ function toggleKeyActive(id) {
 }
 
 function setKeyProgram(id, currentProgram) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
@@ -2333,6 +2369,7 @@ function connectWebSocket(url) {
         };
         ws.onerror = (err) => {
             console.error('[WS] Error', err);
+            if (APP.state.room) setReadOnly(true);
             reject(err);
         };
         ws.onclose = () => {
@@ -2342,8 +2379,10 @@ function connectWebSocket(url) {
                 const hadRoom = APP.state.room;
                 if (hadRoom) {
                     APP.state._lastRoom = hadRoom;
+                    const wasIntentional = APP.state.intentionalDisconnect;
                     cleanupConnection();
-                    if (!APP.state.intentionalDisconnect) {
+                    if (!wasIntentional) {
+                        setReadOnly(true);
                         APP.showError(`⚠ 信令伺服器離線 — ${APP.state._reconnectCount || 0 > 0 ? `第 ${APP.state._reconnectCount} 次重連中...` : '即將自動重連'}`, false);
                         autoReconnect();
                     }
@@ -2416,6 +2455,8 @@ function handleWsMessage(data) {
                     sendWsMessage({type: 'ping'});
                 }
             }, 10000);
+            // Successful join — exit read-only mode
+            setReadOnly(false);
             break;
 
         case 'room-state':
@@ -3239,6 +3280,7 @@ function disconnect() {
     if (APP.state._heartbeatInterval) { clearInterval(APP.state._heartbeatInterval); APP.state._heartbeatInterval = null; }
     APP.showStatusMsg('正在中斷連線...');
     cleanupConnection();
+    setReadOnly(false);
     APP.showStatusMsg('已中斷連線');
 }
 
@@ -3615,6 +3657,10 @@ function showChecklistForm(board) {
                 APP.showStatusMsg('✅ 檢查清單已更新');
             }
         } else {
+            if (APP.state.readOnly) {
+                APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+                return;
+            }
             if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
                 APP.showStatusMsg('❌ 請先建立連線');
                 return;
@@ -3645,6 +3691,10 @@ function showChecklistForm(board) {
 }
 
 function addChecklistItem(checklistId, text) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
@@ -3670,6 +3720,10 @@ function addChecklistItem(checklistId, text) {
 }
 
 function toggleChecklistItem(checklistId, itemId) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const board = APP.state.checklists.find(b => b.id === checklistId);
     if (!board) return;
     const item = board.items.find(i => i.id === itemId);
@@ -3682,6 +3736,10 @@ function toggleChecklistItem(checklistId, itemId) {
 }
 
 async function deleteChecklistItem(checklistId, itemId) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     if (!await showConfirmDialog('確定刪除此項目？')) return;
     const board = APP.state.checklists.find(b => b.id === checklistId);
     if (!board) return;
@@ -3701,6 +3759,10 @@ function togglePinChecklist(checklistId) {
 }
 
 async function deleteChecklistBoard(checklistId) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const b = APP.state.checklists.find(b => b.id === checklistId);
     if (!b) { APP.showStatusMsg('❌ 找不到該檢查清單'); return; }
     if (!await showConfirmDialog('確定刪除「' + b.title + '」？（所有項目也將刪除）')) return;
@@ -3711,6 +3773,10 @@ async function deleteChecklistBoard(checklistId) {
 }
 
 function resetChecklistBoard(checklistId) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const board = APP.state.checklists.find(b => b.id === checklistId);
     if (!board) { APP.showStatusMsg('❌ 找不到該檢查清單'); return; }
     const checkedCount = board.items.filter(i => i.checked).length;
@@ -3768,6 +3834,10 @@ function showChecklistReminderForm(checklistId) {
 }
 
 function setChecklistReminder(checklistId, reminderAt, reminderTitle) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const board = APP.state.checklists.find(b => b.id === checklistId);
     if (!board) return;
     board.reminderAt = reminderAt;
@@ -3884,6 +3954,10 @@ function renderTemplates() {
 }
 
 function useTemplate(tplId) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const tpl = APP.state.checklistTemplates.find(t => t.id === tplId);
     if (!tpl) { APP.showStatusMsg('❌ 找不到該範本'); return; }
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN) || !APP.state.room) {
@@ -3973,6 +4047,10 @@ function showTemplateForm(tplId) {
 
     document.getElementById('tplFormCancel').addEventListener('click', () => overlay.remove());
     document.getElementById('tplFormSave').addEventListener('click', () => {
+        if (APP.state.readOnly) {
+            APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+            return;
+        }
         const title = document.getElementById('tplFormTitle').value.trim();
         if (!title) { APP.showStatusMsg('❌ 範本名稱不能為空'); return; }
         const desc = document.getElementById('tplFormDesc').value.trim();
@@ -4087,6 +4165,10 @@ function updateFileUI() {
     // Cancel buttons
     queue.querySelectorAll('.file-cancel-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+            if (APP.state.readOnly) {
+                APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+                return;
+            }
             const fileId = btn.dataset.fileId;
             const dir = btn.dataset.direction;
             if (dir === 'up') {
@@ -4125,6 +4207,10 @@ function updateFileUI() {
 }
 
 function handleFiles(fileList) {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     if ((!APP.state.ws || APP.state.ws.readyState !== WebSocket.OPEN)) {
         APP.showStatusMsg('❌ 請先建立連線');
         return;
@@ -4371,6 +4457,10 @@ async function sendFileToPeer(entry, pid) {
 
 async function sendNextFile() {
     if (APP.state.fileQueue.length === 0) return;
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const entry = APP.state.fileQueue.find(f => f.status === 'pending');
     if (!entry) return;
     entry.status = 'sending';
@@ -4511,6 +4601,10 @@ function handleFileDone(msg, fromPeerId) {
 })();
 // ========== Chat Room ==========
 function sendChatMessage() {
+    if (APP.state.readOnly) {
+        APP.showStatusMsg('🔒 伺服器中斷，唯讀模式不可操作');
+        return;
+    }
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
     if (!text) { APP.showStatusMsg('💡 請輸入訊息內容'); return; }
