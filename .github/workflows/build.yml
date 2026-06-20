@@ -83,7 +83,6 @@ jobs:
             ./dist-windows/clipper-server.exe
             ./dist-macos/clipper-server
             ./dist-macos/Clipper.app.zip
-          generate_release_notes: true
           body: |
             ## Clipper — 內網 P2P 多人協作工具
 

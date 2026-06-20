@@ -16,7 +16,6 @@ a = Analysis(
         ('protocol.md', '.'),
         ('js', 'js'),
         ('services', 'services'),
-        ('logs', 'logs'),
         ('cert.pem', '.'),
         ('key.pem', '.'),
     ],
