@@ -66,6 +66,7 @@
       this.displayName = opts.displayName || '';
       this.reconnectMaxDelay = opts.reconnectMaxDelay || 30000;
       this.heartbeatInterval = opts.heartbeatInterval || 10000;
+      this.stunServer = opts.stunServer || 'stun:stun.l.google.com:19302';
 
       // 內部狀態
       this._ws = null;
@@ -205,23 +206,15 @@
       this._state.chatMessages.push(msg);
       this._emit('chat', msg);
 
-      // Broadcast to ALL known peers via relay-data (WS relay mode) — only if no P2P DC available
-      var needRelay = false;
-      for (const [pid] of this._peers) {
-        // skip self
-        if (pid === this._peerId) continue;
-        needRelay = true;
-      }
-      if (needRelay) {
-        const payload = {type: 'chat', from: msg.from, text: msg.text, timestamp: msg.timestamp, msgId: this._uuid()};
-        for (const [pid] of this._peers) {
-          if (pid === this._peerId) continue;
-          this._send({
-            type: 'relay-data', room: this._state.room, to: pid, data: payload,
-          });
+      // Try P2P via DataChannel first, fallback to WS relay
+      let sentP2P = false;
+      const dcPayload = {type: 'chat', from: msg.from, text: msg.text, timestamp: msg.timestamp};
+      for (const [pid, ps] of this._peers) {
+        if (ps && ps.dc && ps.dc.readyState === 'open') {
+          try { ps.dc.send(JSON.stringify(dcPayload)); sentP2P = true; } catch (_) {}
         }
       }
-      // Also send chat-backup for server persistence
+      // Always send chat-backup for server persistence
       this._send({
         type: 'chat-backup',
         room: this._state.room,
@@ -229,6 +222,18 @@
         from: msg.from,
         timestamp: msg.timestamp,
       });
+      // Only relay if no P2P available
+      if (!sentP2P) {
+        const payload = {type: 'chat', from: msg.from, text: msg.text, timestamp: msg.timestamp, msgId: this._uuid()};
+        for (const [peerId] of this._peers) {
+          this._send({
+            type: 'relay-data',
+            room: this._state.room,
+            to: peerId,
+            data: payload,
+          });
+        }
+      }
       return true;
     }
 
@@ -470,7 +475,7 @@
       this._fileSending = true;
       const entry = this._fileSendQueue.shift();
       const { peerId, file, fileId, name } = entry;
-      
+
       try {
         const chunkSize = 65536; // 64KB
         const buffer = await file.arrayBuffer();
@@ -485,31 +490,51 @@
           } catch (_) {}
         }
 
-        // Send file-meta (with sha256 for integrity verification)
-        const meta = { type: 'file-meta', fileId, name, size: file.size, chunks: totalChunks };
-        if (sha256) meta.sha256 = sha256;
-        this._send({
-          type: 'relay-data', room: this._state.room, to: peerId, data: meta,
-        });
+        // Check if P2P DataChannel is available
+        const ps = this._peers.get(peerId);
+        const useDc = ps && ps.dc && ps.dc.readyState === 'open';
 
-        // Send chunks sequentially
-        for (let i = 0; i < totalChunks; i++) {
-          const start = i * chunkSize;
-          const end = Math.min(start + chunkSize, buffer.byteLength);
-          const b64 = this._arrayBufferToBase64(buffer.slice(start, end));
+        if (useDc) {
+          // P2P: send raw ArrayBuffer over DataChannel (no base64 overhead)
+          const meta = { type: 'file-meta', fileId, name, size: file.size, chunks: totalChunks };
+          if (sha256) meta.sha256 = sha256;
+          ps.dc.send(JSON.stringify(meta));
+
+          for (let i = 0; i < totalChunks; i++) {
+            const start = i * chunkSize;
+            if (ps.dc.bufferedAmount > 65536) {
+              await new Promise(r => { ps.dc.addEventListener('bufferedamountlow', r, { once: true }); });
+            }
+            try { ps.dc.send(buffer.slice(start, start + Math.min(chunkSize, buffer.byteLength - start))); } catch (_) {}
+            this._emit('file-progress', { peerId, fileId, name, progress: Math.round((i + 1) / totalChunks * 100), status: 'sending' });
+          }
+          ps.dc.send(JSON.stringify({ type: 'file-done', fileId }));
+        } else {
+          // WS relay (base64) — existing code
+          const meta = { type: 'file-meta', fileId, name, size: file.size, chunks: totalChunks };
+          if (sha256) meta.sha256 = sha256;
           this._send({
-            type: 'relay-chunk', room: this._state.room, to: peerId,
-            fileId, chunk: b64, index: i, total: totalChunks,
+            type: 'relay-data', room: this._state.room, to: peerId, data: meta,
           });
-          await this._sleep(10);
-          this._emit('file-progress', { peerId, fileId, name, progress: Math.round((i + 1) / totalChunks * 100), status: 'sending' });
+
+          for (let i = 0; i < totalChunks; i++) {
+            const start = i * chunkSize;
+            const end = Math.min(start + chunkSize, buffer.byteLength);
+            const b64 = this._arrayBufferToBase64(buffer.slice(start, end));
+            this._send({
+              type: 'relay-chunk', room: this._state.room, to: peerId,
+              fileId, chunk: b64, index: i, total: totalChunks,
+            });
+            await this._sleep(10);
+            this._emit('file-progress', { peerId, fileId, name, progress: Math.round((i + 1) / totalChunks * 100), status: 'sending' });
+          }
+
+          this._send({
+            type: 'relay-data', room: this._state.room, to: peerId,
+            data: { type: 'file-done', fileId },
+          });
         }
 
-        // Send file-done
-        this._send({
-          type: 'relay-data', room: this._state.room, to: peerId,
-          data: { type: 'file-done', fileId },
-        });
         this._emit('file-sent', { peerId, fileId, name });
       } catch (err) {
         this._emit('file-error', { peerId, fileId, message: err.message || 'Send failed' });
@@ -668,9 +693,16 @@
         // ---- 成員管理 ----
         case 'room_peers':
           if (data.peers) {
+            const existingPeers = this._peers;
             this._state.peers = data.peers;
-            this._peers = new Map(data.peers.map(p => [p.peerId, p]));
-            data.peers.forEach(p => this._emit('peer-joined', p));
+            this._peers = new Map(data.peers.map(p => {
+              const existing = existingPeers.get(p.peerId);
+              return [p.peerId, existing ? { ...p, pc: existing.pc, dc: existing.dc, connected: existing.connected, relay: existing.relay } : { ...p, pc: null, dc: null, connected: false, relay: false }];
+            }));
+            data.peers.forEach(p => {
+              this._emit('peer-joined', p);
+              this._connectToPeer(p.peerId);
+            });
           }
           break;
 
@@ -681,39 +713,76 @@
             // 離開的 peer
             this._state.peers.forEach(p => {
               if (!newIds.has(p.peerId)) {
+                const ps = this._peers.get(p.peerId);
+                if (ps) {
+                  if (ps.dc) try { ps.dc.close(); } catch (_) {}
+                  if (ps.pc) try { ps.pc.close(); } catch (_) {}
+                }
                 this._peers.delete(p.peerId);
                 this._emit('peer-left', p.peerId);
               }
             });
             this._state.peers = data.peers;
-            this._peers = new Map(data.peers.map(p => [p.peerId, p]));
+            const existingPeers = this._peers;
+            this._peers = new Map(data.peers.map(p => {
+              const existing = existingPeers.get(p.peerId);
+              return [p.peerId, existing ? { ...p, pc: existing.pc, dc: existing.dc, connected: existing.connected, relay: existing.relay } : { ...p, pc: null, dc: null, connected: false, relay: false }];
+            }));
             // 新加入的 peer
             data.peers.forEach(p => {
-              if (!oldIds.has(p.peerId)) this._emit('peer-joined', p);
+              if (!oldIds.has(p.peerId)) {
+                this._emit('peer-joined', p);
+                this._connectToPeer(p.peerId);
+              }
             });
           }
           break;
 
         case 'peer_joined':
           {
-            const peer = { peerId: data.peerId, displayName: data.displayName };
+            const peer = { peerId: data.peerId, displayName: data.displayName, pc: null, dc: null, connected: false, relay: false };
             this._peers.set(data.peerId, peer);
             if (!this._state.peers.find(p => p.peerId === data.peerId)) {
               this._state.peers.push(peer);
             }
             this._emit('peer-joined', peer);
+            this._connectToPeer(data.peerId);
           }
           break;
 
         case 'peer_left':
           {
-            const leftPeer = { peerId: data.peerId, displayName: data.displayName || '' };
-            // Try to get display name from _peers before deleting
-            const existing = this._peers.get(data.peerId);
-            if (existing && existing.displayName) leftPeer.displayName = existing.displayName;
-            this._peers.delete(data.peerId);
-            this._state.peers = this._state.peers.filter(p => p.peerId !== data.peerId);
-            this._emit('peer-left', leftPeer);
+            const ps = this._peers.get(data.peerId);
+            if (ps) {
+              if (ps.dc) try { ps.dc.close(); } catch (_) {}
+              if (ps.pc) try { ps.pc.close(); } catch (_) {}
+            }
+          }
+          this._peers.delete(data.peerId);
+          this._state.peers = this._state.peers.filter(p => p.peerId !== data.peerId);
+          this._emit('peer-left', data.peerId);
+          break;
+
+        // ---- P2P WebRTC Signaling ----
+        case 'offer':
+          this._startWebRTCPeer(data.from, false, data.data);
+          break;
+
+        case 'answer':
+          {
+            const peerState = this._peers.get(data.from);
+            if (peerState && peerState.pc && peerState.pc.remoteDescription === null) {
+              peerState.pc.setRemoteDescription(new RTCSessionDescription(data.data));
+            }
+          }
+          break;
+
+        case 'ice-candidate':
+          {
+            const peerState2 = this._peers.get(data.from);
+            if (peerState2 && peerState2.pc) {
+              peerState2.pc.addIceCandidate(new RTCIceCandidate(data.data));
+            }
           }
           break;
 
@@ -1070,6 +1139,170 @@
         const r = Math.random() * 16 | 0;
         return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
       });
+    }
+
+    // ==================== WebRTC P2P ====================
+
+    /**
+     * Initiate P2P connection to a peer.
+     * Lower peerId creates the offer (initiator), higher waits (responder).
+     */
+    _connectToPeer(targetPeerId) {
+      if (this._peers.has(targetPeerId) && this._peers.get(targetPeerId).pc) return;
+      if (targetPeerId === this._peerId) return;
+      // Lower peerId creates the offer (initiator), higher waits (responder)
+      if (this._peerId < targetPeerId) {
+        this._startWebRTCPeer(targetPeerId, true, null);
+      } else {
+        // Create a placeholder so we know about this peer
+        if (!this._peers.has(targetPeerId)) {
+          this._peers.set(targetPeerId, { pc: null, dc: null, connected: false, relay: false });
+        }
+      }
+    }
+
+    /**
+     * Start WebRTC RTCPeerConnection with a peer.
+     * @param {string} targetPeerId
+     * @param {boolean} isInitiator
+     * @param {Object|null} remoteOffer — SDP offer from the remote peer
+     */
+    _startWebRTCPeer(targetPeerId, isInitiator, remoteOffer) {
+      const existing = this._peers.get(targetPeerId);
+      if (existing && existing.pc) {
+        if (!remoteOffer) return; // already have a PC for this peer
+        // If we get an offer but already have a PC, close and recreate
+        try { if (existing.pc) existing.pc.close(); } catch (_) {}
+        this._peers.delete(targetPeerId);
+      }
+
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: this.stunServer }] });
+
+      if (isInitiator) {
+        const dc = pc.createDataChannel('clipper', { ordered: true });
+        this._setupDataChannel(dc, targetPeerId);
+      }
+
+      pc.ondatachannel = (event) => {
+        this._setupDataChannel(event.channel, targetPeerId);
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && this._state.room) {
+          this._send({
+            type: 'ice-candidate', room: this._state.room,
+            to: targetPeerId,
+            data: { candidate: event.candidate.candidate, sdpMid: event.candidate.sdpMid, sdpMLineIndex: event.candidate.sdpMLineIndex }
+          });
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          const ps = this._peers.get(targetPeerId);
+          if (ps) ps.connected = true;
+          this._emit('transport', { peerId: targetPeerId, mode: 'p2p' });
+        } else if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+          const ps = this._peers.get(targetPeerId);
+          if (ps) { ps.relay = true; ps.connected = true; }
+          this._emit('transport', { peerId: targetPeerId, mode: 'relay' });
+        }
+      };
+
+      // Store
+      this._peers.set(targetPeerId, { pc, dc: null, connected: false, relay: false });
+
+      // Initiator: create offer
+      if (isInitiator) {
+        pc.createOffer()
+          .then(offer => pc.setLocalDescription(offer))
+          .then(() => {
+            if (this._state.room && pc.localDescription) {
+              this._send({
+                type: 'offer', room: this._state.room, to: targetPeerId,
+                data: { type: pc.localDescription.type, sdp: pc.localDescription.sdp }
+              });
+            }
+          })
+          .catch(e => console.warn('[SDK:P2P] createOffer error', e));
+      } else if (remoteOffer) {
+        pc.setRemoteDescription(new RTCSessionDescription(remoteOffer))
+          .then(() => pc.createAnswer())
+          .then(answer => pc.setLocalDescription(answer))
+          .then(() => {
+            if (this._state.room && pc.localDescription) {
+              this._send({
+                type: 'answer', room: this._state.room, to: targetPeerId,
+                data: { type: pc.localDescription.type, sdp: pc.localDescription.sdp }
+              });
+            }
+          })
+          .catch(e => console.warn('[SDK:P2P] createAnswer error', e));
+      }
+    }
+
+    /**
+     * Set up a DataChannel for a peer.
+     */
+    _setupDataChannel(dc, peerId) {
+      dc.binaryType = 'arraybuffer';
+
+      dc.onopen = () => {
+        const ps = this._peers.get(peerId);
+        if (ps) { ps.dc = dc; ps.connected = true; }
+        this._emit('transport', { peerId, mode: 'p2p' });
+      };
+
+      dc.onclose = () => {
+        // Fallback to relay
+        const ps = this._peers.get(peerId);
+        if (ps) { ps.dc = null; ps.relay = true; ps.connected = true; }
+        this._emit('transport', { peerId, mode: 'relay' });
+      };
+
+      // Handle incoming DC messages (chat, file-meta, file-done)
+      dc.onmessage = (event) => {
+        if (typeof event.data === 'string') {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'chat') {
+              this._state.chatMessages.push({ from: msg.from, text: msg.text, timestamp: msg.timestamp });
+              this._emit('chat', { from: msg.from, text: msg.text, timestamp: msg.timestamp });
+            } else if (msg.type === 'file-meta') {
+              this._fileReceives.set(msg.fileId, {
+                fileId: msg.fileId, name: msg.name, size: msg.size, chunks: msg.chunks || 0,
+                sha256: msg.sha256 || null, received: 0, blobs: [], chunkCount: 0,
+                from: peerId, status: 'receiving'
+              });
+              this._emit('file-meta', { fileId: msg.fileId, name: msg.name, size: msg.size, chunks: msg.chunks, from: peerId });
+            } else if (msg.type === 'file-done') {
+              const entry = this._fileReceives.get(msg.fileId);
+              if (entry && entry.status !== 'cancelled') {
+                entry.status = 'done';
+                const blob = new Blob(entry.blobs);
+                this._fileReceives.delete(msg.fileId);
+                this._emit('file-done', { fileId: msg.fileId, name: entry.name, blob, size: entry.size, from: entry.from });
+              }
+            }
+          } catch (_) {}
+        } else if (event.data instanceof ArrayBuffer) {
+          // File chunk received via P2P — route to file receive handler
+          // Find the fileId for this peer
+          for (const [fileId, entry] of this._fileReceives) {
+            if (entry.from === peerId && entry.status === 'receiving') {
+              entry.blobs.push(event.data);
+              entry.received += event.data.byteLength;
+              entry.chunkCount = (entry.chunkCount || 0) + 1;
+              const progress = entry.chunks > 0 ? Math.round(entry.chunkCount / entry.chunks * 100) : Math.round(entry.received / entry.size * 100);
+              entry.progress = progress;
+              if (progress % 10 === 0 || progress === 100) {
+                this._emit('file-chunk', { fileId, index: entry.chunkCount - 1, total: entry.chunks, progress, from: peerId });
+              }
+              break;
+            }
+          }
+        }
+      };
     }
   }
 
