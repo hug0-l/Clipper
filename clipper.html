@@ -1845,8 +1845,9 @@ wsBus.on('connected', () => {
 wsBus.on('disconnected', ({ wasIntentional }) => {
     APP.state.ws = null;
     const hadRoom = !!APP.state.room;
+    const roomCode = APP.state.room;
     if (hadRoom) {
-        APP.state._lastRoom = hadRoom;
+        APP.state._lastRoom = roomCode;
         if (!wasIntentional) {
             setReadOnly(true);
             APP.showError('⚠ 信令伺服器離線', false);
@@ -2620,7 +2621,7 @@ function startWebRTCPeer(targetPeerId, isInitiator, remoteOffer) {
                 clearTimeout(APP.state._pcRestartTimers.get(timerKey));
                 APP.state._pcRestartTimers.delete(timerKey);
             }
-            if (peerState) peerState.connected = true;
+            if (peerState) { peerState.connected = true; peerState.relay = false; }
             const connectedCount = getConnectedCount();
             APP.updateStatus('connected');
             APP.showStatusMsg(`WebRTC 已連線 — ${connectedCount} 位成員`);
@@ -2724,6 +2725,7 @@ function setupDataChannel(dc, peerId) {
         if (peerState) {
             peerState.dc = dc;
             peerState.connected = true;
+            peerState.relay = false;
         } else {
             APP.state.peers.set(peerId, { pc: null, dc: dc, connected: true });
         }
