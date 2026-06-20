@@ -146,7 +146,7 @@ main {
 .main-content {
     flex: 1;
     min-height: 0;
-    overflow-y: auto;
+    overflow: hidden;
     padding: 20px;
 }
 @media (max-width: 600px) {
@@ -160,6 +160,7 @@ main {
     flex-direction: column;
     min-height: 0;
     flex: 1;
+    overflow-y: auto;
     animation: fadeIn 0.2s ease;
 }
 @keyframes fadeIn {
