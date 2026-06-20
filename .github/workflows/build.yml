@@ -1,0 +1,101 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install websockets pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm clipper.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clipper-Windows
+          path: dist/clipper-server.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install websockets pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm clipper.spec
+
+      - name: Compress .app bundle
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/Clipper.app dist/Clipper.app.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clipper-macOS
+          path: |
+            dist/clipper-server
+            dist/Clipper.app.zip
+
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Clipper-Windows
+          path: ./dist-windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: Clipper-macOS
+          path: ./dist-macos
+
+      - name: Display structure
+        run: ls -R ./dist-windows ./dist-macos
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./dist-windows/clipper-server.exe
+            ./dist-macos/clipper-server
+            ./dist-macos/Clipper.app.zip
+          generate_release_notes: true
+          body: |
+            ## Clipper — 內網 P2P 多人協作工具
+
+            ### 下載
+            - **Windows**: `clipper-server.exe` (一鍵執行，雙擊啟動)
+            - **macOS**: `clipper-server` (終端執行) / `Clipper.app.zip` (解壓後雙擊)
+
+            ### 啟動
+            啟動後自動提供：
+            - **WebSocket**: `ws://localhost:8765`
+            - **HTTP**: `http://localhost:8766` (瀏覽器開啟)
+            - 預設配對碼: `1234`
+
+            ### Windows 注意
+            Windows Defender 可能提示「已防止無法辨識的應用程式啟動」，點「更多資訊」→「仍要執行」即可。
