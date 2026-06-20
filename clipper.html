@@ -1840,16 +1840,44 @@ wsManager.enableAutoReconnect();
 // ========== Admin Module ==========
 const adminModule = new AdminModule(wsBus, wsManager);
 window.adminModule = adminModule;
+const adminContainer = document.getElementById('adminPanelContent') || document.querySelector('.admin-panes') || document.getElementById('adminPaneAbout') || document.getElementById('adminPaneStatus');
 if (adminContainer) {
     adminModule.mount(adminContainer);
 } else {
-    // Fallback: mount on a hidden container, or just set up handler
     adminModule.mount(document.createElement('div'));
 }
 // ========== Diagnostic Module ==========
 const diagnosticModule = new DiagnosticModule(wsBus, wsManager);
 window.diagnosticModule = diagnosticModule;
 diagnosticModule.mount(document.createElement('div'));
+
+// ========== Module Initialization & Global Wrappers ==========
+// Create module instances for backward compat with legacy code
+const noticeModule = new NoticeModule(wsBus, wsManager);
+window.noticeModule = noticeModule;
+const checklistModule = new ChecklistModule(wsBus, wsManager);
+window.checklistModule = checklistModule;
+const keymgmtModule = new KeyMgmtModule(wsBus, wsManager);
+window.keymgmtModule = keymgmtModule;
+// Mount modules (they self-register WS handlers in constructor)
+noticeModule.mount(document.createElement('div'));
+checklistModule.mount(document.createElement('div'));
+keymgmtModule.mount(document.createElement('div'));
+
+// Global wrapper functions for backward compatibility (legacy code calls these)
+function renderNoticeBoard() { noticeModule.renderNoticeBoard(); }
+function renderChecklistBoards() { checklistModule.renderBoards(); }
+function renderKeyManagement() { keymgmtModule.renderKeyManagement(); }
+function renderCmsTable() { noticeModule.renderCmsTable(); }
+function showNoticeForm(post) { noticeModule.showNoticeForm(post); }
+function updateTransportUI() {
+    if (window.adminModule && typeof adminModule._updateSettingsView === 'function') {
+        adminModule._updateSettingsView();
+    }
+}
+function updatePeerTargetUI() { /* handled by modules */ }
+function updateFileUI() { /* handled by files module */ }
+
 const CHAT_PAGE_SIZE = 30;          // 每次載入更多增加條數
 const CHAT_MAX_VISIBLE = 200;
 
@@ -3624,32 +3652,7 @@ async function deleteChatMessage(msgId) {
     APP.showStatusMsg('✅ 訊息已刪除');
 }
 
-// ========== Module Initialization & Global Wrappers ==========
-// Create module instances for backward compat with legacy code
-const noticeModule = new NoticeModule(wsBus, wsManager);
-window.noticeModule = noticeModule;
-const checklistModule = new ChecklistModule(wsBus, wsManager);
-window.checklistModule = checklistModule;
-const keymgmtModule = new KeyMgmtModule(wsBus, wsManager);
-window.keymgmtModule = keymgmtModule;
-// Mount modules (they self-register WS handlers in constructor)
-noticeModule.mount(document.createElement('div'));
-checklistModule.mount(document.createElement('div'));
-keymgmtModule.mount(document.createElement('div'));
 
-// Global wrapper functions for backward compatibility (legacy code calls these)
-function renderNoticeBoard() { noticeModule.renderNoticeBoard(); }
-function renderChecklistBoards() { checklistModule.renderBoards(); }
-function renderKeyManagement() { keymgmtModule.renderKeyManagement(); }
-function renderCmsTable() { noticeModule.renderCmsTable(); }
-function showNoticeForm(post) { noticeModule.showNoticeForm(post); }
-function updateTransportUI() {
-    if (window.adminModule && typeof adminModule._updateSettingsView === 'function') {
-        adminModule._updateSettingsView();
-    }
-}
-function updatePeerTargetUI() { /* handled by modules */ }
-function updateFileUI() { /* handled by files module */ }
 
 </script>
 </body>
