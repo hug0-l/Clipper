@@ -303,6 +303,24 @@
       return true;
     }
 
+
+    /**
+     * 觸發遠端 CUE（遙控器模式，廣播給所有 Clipper 成員）
+     * @param {string} progName - 節目名稱
+     * @param {string} cueName - Cue 點名稱
+     */
+    triggerCue(progName, cueName) {
+      if (!this._connected || !this._state.room) return false;
+      const payload = {type: 'cue-trigger', progName, cueName, from: this.displayName || this._peerId, timestamp: Date.now()};
+      for (const [pid, ps] of this._peers) {
+        if (ps && ps.dc && ps.dc.readyState === 'open') {
+          try { ps.dc.send(JSON.stringify(payload)); } catch (_) {}
+        }
+      }
+      this._send({type: 'relay-data', room: this._state.room, to: '*broadcast*', data: payload});
+      return true;
+    }
+
     /**
      * 回覆訊息（如同 sendChat 但 payload 包含 replyTo）
      * @param {string} text
@@ -1112,6 +1130,8 @@
             this._emit('chat-delete', {msgId: data.data.msgId});
           } else if (data.data && data.data.type === 'ack') {
             this._emit('ack', {msgId: data.data.msgId, from: data.from});
+          } else if (data.data && data.data.type === 'cue-trigger') {
+            this._emit('cue-trigger', {progName: data.data.progName, cueName: data.data.cueName, from: data.data.from, timestamp: data.data.timestamp});
           } else if (data.data && data.data.type === 'file-meta') {
             const meta = data.data;
             const fromPeer = this._peers.get(data.from);
