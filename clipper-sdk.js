@@ -470,10 +470,20 @@
         const buffer = await file.arrayBuffer();
         const totalChunks = Math.ceil(buffer.byteLength / chunkSize);
 
-        // Send file-meta
+        // Compute SHA-256 checksum (like native clipper)
+        let sha256 = null;
+        if (crypto.subtle) {
+          try {
+            const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+            sha256 = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+          } catch (_) {}
+        }
+
+        // Send file-meta (with sha256 for integrity verification)
+        const meta = { type: 'file-meta', fileId, name, size: file.size, chunks: totalChunks };
+        if (sha256) meta.sha256 = sha256;
         this._send({
-          type: 'relay-data', room: this._state.room, to: peerId,
-          data: { type: 'file-meta', fileId, name, size: file.size, chunks: totalChunks },
+          type: 'relay-data', room: this._state.room, to: peerId, data: meta,
         });
 
         // Send chunks sequentially
@@ -504,19 +514,53 @@
     }
 
     /**
-     * 取消檔案傳送
+     * 取消檔案傳送（從 queue 移除 + 通知對方）
      * @param {string} peerId
      * @param {string} fileId
      */
     cancelFile(peerId, fileId) {
       if (!this._connected || !this._state.room) return;
+      // 從發送佇列移除（防止 queue 卡住）
+      this._fileSendQueue = this._fileSendQueue.filter(function(e) { return e.fileId !== fileId; });
+      // 通知接收方取消
       this._send({ type: 'file-cancel', room: this._state.room, to: peerId, fileId });
-      // Also cancel local receive if any
+      // 取消本機接收
       const entry = this._fileReceives.get(fileId);
       if (entry) {
         entry.status = 'cancelled';
         this._fileReceives.delete(fileId);
       }
+      this._emit('file-error', { peerId, fileId, message: 'Transfer cancelled' });
+    }
+
+    /**
+     * 重新傳送失敗的檔案（重新加入 queue）
+     * @param {string} peerId
+     * @param {string} fileId
+     * @param {File} file
+     */
+    retryFile(peerId, fileId, file) {
+      this.sendFile(peerId, file);
+    }
+
+    /**
+     * 取得發送佇列狀態（給 UI 使用）
+     * @returns {Array} [{peerId, fileId, name, size, status}]
+     */
+    getSendQueue() {
+      return this._fileSendQueue.map(function(e) { return { peerId: e.peerId, fileId: e.fileId, name: e.name, size: e.size, status: e.status }; });
+    }
+
+    /**
+     * 取得接收佇列狀態
+     * @returns {Array} [{fileId, name, size, progress, status, from}]
+     */
+    getReceiveQueue() {
+      var result = [];
+      for (const [fileId, entry] of this._fileReceives) {
+        result.push({ fileId, name: entry.name, size: entry.size, progress: entry.progress || 0, status: entry.status, from: entry.from });
+      }
+      return result;
     }
 
     // ==================== 內部：檔案傳輸工具 ====================
@@ -836,6 +880,7 @@
               name: meta.name,
               size: meta.size,
               chunks: meta.chunks || 0,
+              sha256: meta.sha256 || null,
               received: 0,
               blobs: [],
               chunkCount: 0,
@@ -849,7 +894,21 @@
               entry.status = 'done';
               const blob = new Blob(entry.blobs);
               this._fileReceives.delete(data.data.fileId);
-              this._emit('file-done', { fileId: data.data.fileId, name: entry.name, blob, size: entry.size, from: entry.from });
+
+              // SHA-256 verification (like native clipper)
+              var verified = null;
+              if (entry.sha256 && crypto.subtle) {
+                (async () => {
+                  try {
+                    const buf = await blob.arrayBuffer();
+                    const hashBuffer = await crypto.subtle.digest('SHA-256', buf);
+                    const hash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+                    verified = (hash === entry.sha256);
+                  } catch (_) {}
+                })();
+              }
+
+              this._emit('file-done', { fileId: data.data.fileId, name: entry.name, blob, size: entry.size, from: entry.from, sha256: entry.sha256, verified: verified });
             }
           }
           break;
