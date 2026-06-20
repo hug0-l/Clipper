@@ -589,7 +589,7 @@
     getReceiveQueue() {
       var result = [];
       for (const [fileId, entry] of this._fileReceives) {
-        result.push({ fileId, name: entry.name, size: entry.size, progress: entry.progress || 0, status: entry.status, from: entry.from });
+        result.push({ fileId, name: entry.name, size: entry.size, progress: entry.progress || 0, status: entry.status, from: entry.from, fromDisplayName: entry.fromDisplayName || entry.from });
       }
       return result;
     }
@@ -959,6 +959,8 @@
             this._emit('chat', chatMsg);
           } else if (data.data && data.data.type === 'file-meta') {
             const meta = data.data;
+            const fromPeer = this._peers.get(data.from);
+            const fromDisplayName = fromPeer ? (fromPeer.displayName || data.from) : data.from;
             this._fileReceives.set(meta.fileId, {
               fileId: meta.fileId,
               name: meta.name,
@@ -969,9 +971,10 @@
               blobs: [],
               chunkCount: 0,
               from: data.from,
+              fromDisplayName: fromDisplayName,
               status: 'receiving',
             });
-            this._emit('file-meta', { fileId: meta.fileId, name: meta.name, size: meta.size, chunks: meta.chunks, from: data.from });
+            this._emit('file-meta', { fileId: meta.fileId, name: meta.name, size: meta.size, chunks: meta.chunks, from: data.from, fromDisplayName: fromDisplayName });
           } else if (data.data && data.data.type === 'file-done') {
             const entry = this._fileReceives.get(data.data.fileId);
             if (entry && entry.status !== 'cancelled') {
@@ -1272,12 +1275,14 @@
               this._state.chatMessages.push({ from: msg.from, text: msg.text, timestamp: msg.timestamp });
               this._emit('chat', { from: msg.from, text: msg.text, timestamp: msg.timestamp });
             } else if (msg.type === 'file-meta') {
+              const dcFromPeer = this._peers.get(peerId);
+              const dcFromName = dcFromPeer ? (dcFromPeer.displayName || peerId) : peerId;
               this._fileReceives.set(msg.fileId, {
                 fileId: msg.fileId, name: msg.name, size: msg.size, chunks: msg.chunks || 0,
                 sha256: msg.sha256 || null, received: 0, blobs: [], chunkCount: 0,
-                from: peerId, status: 'receiving'
+                from: peerId, fromDisplayName: dcFromName, status: 'receiving'
               });
-              this._emit('file-meta', { fileId: msg.fileId, name: msg.name, size: msg.size, chunks: msg.chunks, from: peerId });
+              this._emit('file-meta', { fileId: msg.fileId, name: msg.name, size: msg.size, chunks: msg.chunks, from: peerId, fromDisplayName: dcFromName });
             } else if (msg.type === 'file-done') {
               const entry = this._fileReceives.get(msg.fileId);
               if (entry && entry.status !== 'cancelled') {
