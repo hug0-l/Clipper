@@ -1,6 +1,6 @@
 # Clipper — 內網跨子網 P2P 多人協作工具
 
-v1.2.0 — 離線唯讀防護 + API 開放三層架構 + WebRTC P2P + 檔案傳輸
+v1.2.0 — 內網 P2P 多人協作工具 (WebRTC + WebSocket)。即時聊天、檔案傳輸、公告欄、檢查清單、密鑰管理。附 JS SDK (clipper-sdk.js)、REST API、WebSocket 協定文件。離線唯讀防護、幽靈復活防護。適用於廣播電視台內網協作。
 
 ## 快速開始
 
