@@ -5,63 +5,27 @@ All notable changes to Clipper are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.1.0] — 2026-06-20
 
 ### 🚀 新增功能
-
-- **🛡️ 離線唯讀模式** — 伺服器中斷時自動鎖定所有協作功能，防止離線操作導致重連後的資料衝突（R-1 / R-2）
-  - `APP.state.readOnly` + `setReadOnly(enabled)` 全域開關
-  - WS 斷線自動觸發唯讀、重連成功自動解除
-  - 手動中斷不觸發唯讀模式
-  - 標題橫幅滑入動畫 + 按鈕灰色半透明 + 檔案區遮罩（R-4）
-- **🔒 22 個協作函式唯讀攔截** — 聊天、檔案傳輸、公告欄、檢查清單、密鑰管理所有資料修改操作在唯讀時阻擋並提示（R-3）
-- **🧟 幽靈復活防護** — 伺服器記錄已刪除的 IDs，重連時 room-state 合併自動過濾，防止已刪除的資料透過 localStorage 復活（R-5）
-- **🌐 自動跳轉瀏覽器** — 啟動 `signal_server.py` 後自動開啟 `http://localhost:8766` 客戶端頁面（R-6）
-- **📄 Clipper WebSocket API 協定文件** — 建立 `protocol.md`（1936 行），完整記錄 48 個 message types，含 Request/Response Schema、連線流程圖、錯誤處理（R-7）
-- **📦 clipper-sdk.js 輕量 SDK** (1,317行) — 無外部依賴的 JavaScript SDK，3 行程式碼即可將外部應用接入 Clipper（R-8）
-- **🌐 REST API 橋接層** — signal_server.py HTTP 伺服器加入 REST 端點：health check、房間狀態查詢、公告/檢查清單/密鑰管理 CRUD。CORS 支援，向後相容靜態檔案服務（R-9）
-- **🔗 VCC PRE Clipper 分頁整合** — countdownctrl 的 Clipper IM 分頁改用 `clipper-sdk.js` 對接完整協議，預設名稱 VPRE，聊天訊息與完整 Clipper 客戶端互通（R-10）
-- **📁 SDK 檔案傳輸** — `sendFile()` + queue 佇列 + `file-progress`/`file-sent`/`file-error` 事件。支援 SHA-256 checksum 完整性驗證（F-1）
-- **📁 countdownctrl 檔案傳輸 UI** — 先選對象再拖放，上傳/下載雙向進度條（F-1 後續）
-- **🌐 WebRTC P2P 支援 (SDK)** — `RTCPeerConnection` + DataChannel，聊天與檔案 chunks 走 P2P 直連，0% base64 開銷，失敗自動降級 WS relay（P2P-1）
-- **🔒 用戶端隱私改善** — 所有 UI 隱藏 `peerId`，只顯示 displayName（native + SDK + countdownctrl）
-- **🔄 SDK 增加重試機制** — `retryFile()`、`getSendQueue()`、`getReceiveQueue()` 佇列查詢
-- **🐛 timestamp 型別安全** — server 端 `_ts_val()` 統一處理 int/str/ISO 時間格式
+- **📦 PyInstaller 打包** — 12MB 單一執行檔，Windows + macOS 雙平台 GitHub Actions 自動編譯
+- **🤖 CI/CD 自動化** — `.github/workflows/build.yml` 完整 pipeline：推送 `v*` tag 自動建置 + Release
+- **💬 聊天室現代化氣泡 UI** — 改善聊天版面、氣泡樣式、搜尋列固定只讓訊息區滾動
+- **🌐 WS Server URL 自動持久化** — 瀏覽器 hostname 自動偵測 + URL/Room ID 儲存
 
 ### 🐛 修復
-
-- **管理面板無法取得伺服器日誌** — `_refreshLogViewer()` 現在會向伺服器請求日誌，切換管理頁籤時自動刷新
-- **伺服器設定未回傳到網頁端** — 登入成功時一併回傳 config（含 logDir），管理面板正確顯示日誌路徑
-- **`secrets` 模組未 import** — 導致 admin session token 生成時 `NameError`
-- **JS 殘留孤立程式碼** — 造成整個 script 無法解析，web client freeze
-- **檔案傳輸無法選取 relay-only 對等點** — 新增 `isPeerReachable()` 輔助函式，WS Relay 用戶現在可被選取為傳送對象
-- **管理面板 unauthorized 未處理** — 會話過期時自動回到登入畫面
-- **STUN 變更未即時生效** — 儲存 STUN 伺服器後立即更新本地狀態
-- **CSS 孤立 @keyframes block** — 移除殘留的無效 CSS
+- **所有用戶卡在 relay 模式** — 3 個 root cause 一次修復，P2P 連線恢復正常
+- **聊天訊息看不見** — 孤立的 `dc.onmessage` + `handleWsMessage` 呼叫修復
+- **ChatModule 未實例化** — 導致發送按鈕無反應
+- **聊天佈局損壞** — `.main-content` 非 flex 容器
+- **雙重滾動條問題** — 聊天頁排除 `tab-pane` 的 `overflow-y:auto`
+- **Tab 溢出問題** — 限制 `tab-pane` 高度防止內容溢出
+- **聊天輸入框消失** — load-more 後 preserve scroll position
+- **傳送訊息未持久化** — `_sendChatMessage` 未寫入 `APP.state.persistedChatMessages`
 
 ### 🔧 改善
-
-- **管理面板服務器日誌路徑** — 正確顯示 `logs/clipper_&lt;date&gt;.log` 而非資料庫路徑
-- **檔案傳輸單一對等點自動選取** — 只剩一位可送達對象時自動選取，減少操作步驟
-- **對等點離開時清理已選取對象** — `removePeer()` 現在一併清理 `selectedTargetPeerIds`
-- **管理面板切換自動刷新** — 切換到日誌/設定頁籤時自動請求最新資料
-- **`admin-set-config` 回應含 config** — 伺服器在設定更新後回傳當前 config 狀態
-- **NTP 伺服器驗證** — `_ntp_query()` 回傳 `(offset, is_valid)` tuple，區分「偏移為零」與「查詢失敗」
-- **NTP 驗證可視化** — 管理面板偏移量以 🟢 綠色（正常）/ 🔴 紅色（無回應）顯示，hover 可查看 tooltip
-- **NTP 儲存時即時驗證** — 儲存 NTP 伺服器後即顯示連線成功或失敗的明確訊息
-- **內建 HTTP Server** — 伺服器自動在 port 8766 提供 `clipper.html` 及靜態檔案，無需手動開啟檔案
-- **WebSocket 重連遺失顯示名稱** — `autoReconnect()`、toast 重連按鈕、`generated` 處理器現在傳送 `displayName`，避免 peer-list 顯示 peerId 而非名稱
-- **顯示名稱變更未通知伺服器** — 內嵌編輯顯示名稱時自動發送 `register-name`，peer-list 即時更新
-- **線上用戶列表改善** — 顯示 peerId 在名稱旁方便辨識；`isSelf` 判斷改為純 peerId 比對
-- **程式碼審查修復** — 修復 5 個潛在 bug（dead code、重複 WS 連線、`setChecklistReminder` 未定義變數、重複 debug dump 監聽器、case 格式錯誤）
-- **iPhone 無法收發訊息** — 放寬 `sendChatMessage` 和 `relayToPeer` 的連線門禁，從 `APP.state.connected`（需 DC 開啟）改為 WS 連線檢查，iPhone（不支援 WebRTC）現在可透過 relay 正常收發
-- **P2P + Relay 混合模式** — WebRTC DataChannel 優先（桌面瀏覽器 P2P 直連），失敗自動降級 WS Relay（iPhone 相容），傳輸模式設定頁即時顯示各用戶 P2P/Relay 狀態
-- **用戶標籤格式統一** — 所有介面中的用戶名稱統一為 `顯示名稱 (PeerID)` 格式（成員離開通知、傳輸模式設定頁、線上用戶列表、檔案接收彈窗）
-- **檔案傳輸取消按鈕修復** — relay 模式下取消操作正確匹配 fileId，清除殘留的 fileSending 條目
-- **檔案傳輸 Relay 優化** — chunk 大小從 16KB 提升到 64KB，每 chunk 間隔 10ms 防止 WS flood，meta 訊息正確傳遞 chunk 總數，UI 更新頻率降低（每 8 個 chunk 才刷新）
-- **檔案傳輸佇列修復** — 現在可依序傳送所有佇列中的檔案，不再只有第一檔能傳
-- **檔案傳輸對象選擇** — 取消「全部」預設高亮和單一對象自動選取，用戶必須手動點選
-- **HTTP 回應加上 no-cache header** — 防止瀏覽器快取舊版 clipper.html 導致介面不更新
+- 搜尋列與輸入框固定，只讓訊息區滾動
+- 多項 chat scrolling / layout 問題修復
 
 ### 🚀 新增功能
 

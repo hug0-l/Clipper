@@ -11,17 +11,15 @@ This file provides guidance to AI agents when working with this repository.
 ## Architecture
 
 ```
-clipper.html          # Single-page application (SPA), ~5,050 lines
-                      # HTML + CSS + JS in one file. No bundler/framework.
-signal_server.py      # WebSocket signaling server, ~1,400 lines
-                      # Handles: room mgmt, WebRTC signaling, WS relay,
-                      # admin panel, NTP sync, SQLite persistence.
-                      # Built-in HTTP server on port 8766 + REST API.
-clipper-sdk.js        # Lightweight JS SDK (1,317 lines), 0 dependencies
-                      # Wraps Clipper WS protocol + WebRTC P2P
-protocol.md           # Full WS API specification (1,936 lines, 48 msg types)
-clipper_data.db       # SQLite database (auto-created at startup)
-logs/                 # Daily log files (auto-rotated, 24h retention)
+├── clipper.html              # 主用戶端 SPA（WebRTC + WS + 所有功能模組，~4,550 行）
+├── signal_server.py          # 信令伺服器（WebSocket 配對 + 持久化儲存 + Relay，~1,400 行）
+├── clipper.spec              # PyInstaller 打包設定
+├── clipper-sdk.js            # 輕量 JS SDK (1,317 行)，0 外部依賴
+├── protocol.md               # 完整 WS API 規範 (1,936 行，48 種訊息類型)
+├── .github/workflows/        # GitHub Actions CI/CD
+│   └── build.yml             # Windows + macOS 自動編譯 + Release
+├── clipper_data.db           # SQLite 資料庫（啟動時自動建立）
+├── logs/                     # 每日日誌檔案（自動輪替，24h 保留）
 ```
 ## Protocol
 
@@ -64,3 +62,32 @@ logs/                 # Daily log files (auto-rotated, 24h retention)
 - **SDK 檔案傳輸佇列**: `sendFile()` 放入 `_fileSendQueue`，依序傳送。`_fileSending` 旗標避免並行 flood。
 - **REST API**: `signal_server.py` 在 port 8766 提供 `GET /api/health`、`GET /api/rooms/:room/state`、`POST|PUT|DELETE /api/rooms/:room/notice` 等端點。CORS `*`。
 - **peerId 不顯示給用戶**: 三個 codebase（clipper.html / clipper-sdk.js / countdownctrl）的所有 UI 文字只顯示 `displayName`。`peerId` 只用於內部識別（Map key、`btn.title`）。
+
+## 🤖 CI/CD — GitHub Actions
+
+### Build Workflow (`.github/workflows/build.yml`)
+
+| 觸發條件 | 動作 |
+|---------|------|
+| 推送 `v*` tag（如 `v2.1.0`） | 自動在 Windows + macOS 編譯 PyInstaller 執行檔 |
+| 手動 `workflow_dispatch` | 可從 GitHub Actions tab 手動觸發 |
+
+### 產出
+| 平台 | 檔案 |
+|------|------|
+| 🪟 Windows | `clipper-server.exe` |
+| 🍎 macOS | `clipper-server` (執行檔) + `Clipper.app.zip` (.app Bundle) |
+
+### 觸發方式
+```bash
+git tag v2.1.0 && git push origin v2.1.0
+# → GitHub Actions 自動建置 → Release 自動建立
+```
+
+### Release 流程
+1. 打 tag → push → GitHub Actions 觸發
+2. `build-windows` job: 編譯 `clipper-server.exe`
+3. `build-macos` job: 編譯 `clipper-server` + 壓縮 `Clipper.app.zip`
+4. `release` job: 自動建立 GitHub Release 並附上三個產出檔案
+
+> **注意**：Release 由 `softprops/action-gh-release@v2` 自動建立，需確保 `GITHUB_TOKEN` 有 `contents: write` 權限（已在 workflow 中設定）。
