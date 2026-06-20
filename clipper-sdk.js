@@ -78,6 +78,7 @@
       this._heartbeatTimer = null;
       this._pending = {};
       this._peers = new Map();
+      this._fileReceives = new Map();
 
       // 快取資料
       this._state = {
@@ -417,6 +418,112 @@
     }
 
     // ==================== 資料讀取 ====================
+    // ==================== 檔案傳輸 ====================
+
+    /**
+     * 觸發瀏覽器檔案選擇對話框，回傳所選 FileList
+     * @returns {Promise<FileList|null>}
+     */
+    pickFiles() {
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.onchange = () => resolve(input.files);
+        input.click();
+      });
+    }
+
+    /**
+     * 發送檔案到指定 peer
+     * @param {string} peerId
+     * @param {File} file
+     */
+    async sendFile(peerId, file) {
+      if (!this._connected || !this._state.room || !file) {
+        this._emit('file-error', { peerId, fileId: null, message: 'Not connected or invalid file' });
+        return;
+      }
+      const fileId = this._uuid();
+      const chunkSize = 65536; // 64KB
+      const buffer = await file.arrayBuffer();
+      const totalChunks = Math.ceil(buffer.byteLength / chunkSize);
+
+      // Send file-meta via relay-data
+      this._send({
+        type: 'relay-data',
+        room: this._state.room,
+        to: peerId,
+        data: {
+          type: 'file-meta',
+          fileId,
+          name: file.name,
+          size: file.size,
+          chunks: totalChunks,
+        },
+      });
+
+      // Send chunks
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, buffer.byteLength);
+        const slice = buffer.slice(start, end);
+        const b64 = this._arrayBufferToBase64(slice);
+        this._send({
+          type: 'relay-chunk',
+          room: this._state.room,
+          to: peerId,
+          fileId,
+          chunk: b64,
+          index: i,
+          total: totalChunks,
+        });
+        // Small delay to avoid flooding WS
+        await this._sleep(10);
+        this._emit('file-progress', { peerId, fileId, name: file.name, progress: Math.round((i + 1) / totalChunks * 100), status: 'sending' });
+      }
+
+      // Send file-done
+      this._send({
+        type: 'relay-data',
+        room: this._state.room,
+        to: peerId,
+        data: { type: 'file-done', fileId },
+      });
+      this._emit('file-sent', { peerId, fileId, name: file.name });
+    }
+
+    /**
+     * 取消檔案傳送
+     * @param {string} peerId
+     * @param {string} fileId
+     */
+    cancelFile(peerId, fileId) {
+      if (!this._connected || !this._state.room) return;
+      this._send({ type: 'file-cancel', room: this._state.room, to: peerId, fileId });
+      // Also cancel local receive if any
+      const entry = this._fileReceives.get(fileId);
+      if (entry) {
+        entry.status = 'cancelled';
+        this._fileReceives.delete(fileId);
+      }
+    }
+
+    // ==================== 內部：檔案傳輸工具 ====================
+
+    _arrayBufferToBase64(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    }
+
+    _sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
 
     getNotices() {
       return this._state.noticePosts.slice();
@@ -702,7 +809,7 @@
           }
           break;
 
-        // ---- WS 中繼（聊天等） ----
+        // ---- WS 中繼（聊天、檔案等） ----
         case 'relay-data':
           if (data.data && data.data.type === 'chat') {
             const chatMsg = {
@@ -712,6 +819,59 @@
             };
             this._state.chatMessages.push(chatMsg);
             this._emit('chat', chatMsg);
+          } else if (data.data && data.data.type === 'file-meta') {
+            const meta = data.data;
+            this._fileReceives.set(meta.fileId, {
+              fileId: meta.fileId,
+              name: meta.name,
+              size: meta.size,
+              chunks: meta.chunks || 0,
+              received: 0,
+              blobs: [],
+              chunkCount: 0,
+              from: data.from,
+              status: 'receiving',
+            });
+            this._emit('file-meta', { fileId: meta.fileId, name: meta.name, size: meta.size, chunks: meta.chunks, from: data.from });
+          } else if (data.data && data.data.type === 'file-done') {
+            const entry = this._fileReceives.get(data.data.fileId);
+            if (entry && entry.status !== 'cancelled') {
+              entry.status = 'done';
+              const blob = new Blob(entry.blobs);
+              this._fileReceives.delete(data.data.fileId);
+              this._emit('file-done', { fileId: data.data.fileId, name: entry.name, blob, size: entry.size, from: entry.from });
+            }
+          }
+          break;
+        // ---- 檔案傳輸：中繼 chunk ----
+        case 'relay-chunk':
+          {
+            const entry = this._fileReceives.get(data.fileId);
+            if (entry && entry.status !== 'cancelled') {
+              const binaryStr = atob(data.chunk);
+              const bytes = new Uint8Array(binaryStr.length);
+              for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+              entry.blobs.push(bytes.buffer);
+              entry.received += bytes.length;
+              entry.chunkCount = (entry.chunkCount || 0) + 1;
+              const progress = entry.chunks > 0 ? Math.round(entry.chunkCount / entry.chunks * 100) : Math.round(entry.received / entry.size * 100);
+              entry.progress = progress;
+              if (progress % 10 === 0 || progress === 100) {
+                this._emit('file-chunk', { fileId: data.fileId, index: data.index, total: data.total, progress, from: data.from });
+              }
+            }
+          }
+          break;
+
+        // ---- 檔案傳輸：取消 ----
+        case 'file-cancel':
+          {
+            const entry = this._fileReceives.get(data.fileId);
+            if (entry) {
+              entry.status = 'cancelled';
+              this._fileReceives.delete(data.fileId);
+              this._emit('file-error', { peerId: data.from, fileId: data.fileId, message: 'Transfer cancelled' });
+            }
           }
           break;
 
