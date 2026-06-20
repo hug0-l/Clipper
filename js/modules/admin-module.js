@@ -69,6 +69,10 @@ class AdminModule extends ClipperModule {
                     this._refreshLogViewer();
                 } else if (tab === 'config' && this._adminToken) {
                     sendWsMessage({type: 'admin-get-config', token: this._adminToken});
+                } else if (tab === 'diagnostic') {
+                    if (window.diagnosticModule) {
+                        window.diagnosticModule.requestFullDiagnostic();
+                    }
                 }
             });
         });

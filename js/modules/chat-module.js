@@ -234,6 +234,17 @@ class ChatModule extends ClipperModule {
         return ((hash % 360) + 360) % 360;
     }
 
+    // ── User color from name ──
+
+    _userColor(name) {
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) {
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const hue = ((hash % 360) + 360) % 360;
+        return { hue, light: `hsl(${hue}, 50%, 55%)`, dark: `hsl(${hue}, 40%, 30%)` };
+    }
+
     // ── Rendering ──
 
     _renderSingleChatMessage(from, text, timestamp, msgId, replyTo, container) {
@@ -260,16 +271,16 @@ class ChatModule extends ClipperModule {
         }
 
         if (!isSelf) {
-            const hue = this._nameToHue(from);
-            const color = 'hsl(' + hue + ', 70%, 65%)';
-            div.style.borderLeftColor = color;
-            innerHtml += '<div class="msg-sender" style="color:' + color + '">' + escapeHtml(displayFrom) + '</div>'
+            const { hue, light, dark } = this._userColor(from);
+            div.style.setProperty('--msg-bg-dark', dark);
+            innerHtml += '<div class="msg-sender"><span class="msg-avatar" style="background:' + light + '">' + escapeHtml(displayFrom.charAt(0)) + '</span><span style="color:' + light + '">' + escapeHtml(displayFrom) + '</span></div>'
                 + '<div class="msg-text">' + escapeHtml(text) + '</div>'
                 + '<div class="msg-time">' + timeStr + '</div>';
         } else {
+            const { hue, light } = this._userColor(from);
             const entry = msgId ? APP.state.sentMessages.get(msgId) : null;
             const tick = entry ? '<span class="msg-tick' + (entry.acks.size >= entry.totalPeers ? ' delivered' : ' sent') + '">' + (entry.acks.size >= entry.totalPeers ? '✓✓' : '✓') + '</span>' : '';
-            innerHtml += '<div class="msg-sender">' + escapeHtml(displayFrom) + '</div>'
+            innerHtml += '<div class="msg-sender"><span class="msg-avatar" style="background:' + light + '">' + escapeHtml(displayFrom.charAt(0)) + '</span>' + escapeHtml(displayFrom) + '</div>'
                 + '<div class="msg-text">' + escapeHtml(text) + '</div>'
                 + '<div class="msg-time">' + timeStr + ' ' + tick + '</div>';
         }

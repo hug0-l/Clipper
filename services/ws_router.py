@@ -2,6 +2,7 @@
 import json
 import random
 import time
+import asyncio
 from datetime import datetime, timezone
 
 from services.checklist_service import ChecklistService
@@ -17,6 +18,20 @@ checklist_service = ChecklistService(_persistence)
 notice_service = NoticeService(_persistence)
 keymgmt_service = KeyMgmtService(_persistence)
 chat_service = ChatService(_persistence)
+
+def _track_error(ctx, category, message, exc_info=None):
+    """Increment error counter and log the error."""
+    if "_error_counts" in ctx:
+        ctx["_error_counts"][category] = ctx["_error_counts"].get(category, 0) + 1
+    if "log" in ctx:
+        ctx["log"]('ERROR', f'[{category}] {message}')
+    if exc_info:
+        import traceback
+        tb = ''.join(traceback.format_exception_only(type(exc_info), exc_info))
+        if "debug" in ctx:
+            ctx["debug"](f'  └─ Exception: {tb.strip()}')
+
+
 
 ROUTES = {}
 
@@ -37,8 +52,8 @@ async def h_generate(websocket, data, ctx):
     code = ctx["room_service"].generate_room_code()
     try:
         await websocket.send(json.dumps({"type": "generated", "room": code}))
-    except Exception:
-        pass
+    except Exception as e:
+        _track_error(ctx, 'generate', 'send generated failed', e)
 
 
 @register("join")
@@ -124,8 +139,8 @@ async def h_webrtc_signal(websocket, data, ctx):
         try:
             await ws.send(json.dumps(out))
             ctx["debug"](f"→ TX {msg_type} to={target} from={my_peer_id}")
-        except Exception:
-            pass
+        except Exception as e:
+            _track_error(ctx, 'webrtc', f'send to {target} failed', e)
     elif not target and len(ctx["rooms"][rid]) == 2:
         for pid, info in ctx["rooms"][rid].items():
             if pid != my_peer_id:
@@ -137,8 +152,8 @@ async def h_webrtc_signal(websocket, data, ctx):
                 try:
                     await info["ws"].send(json.dumps(out))
                     ctx["debug"](f"→ TX {msg_type} to={pid} from={my_peer_id} (2-peer compat)")
-                except Exception:
-                    pass
+                except Exception as e:
+                    _track_error(ctx, 'webrtc', f'send to {pid} failed', e)
                 break
     else:
         await websocket.send(json.dumps({
@@ -443,10 +458,13 @@ async def h_ping(websocket, data, ctx):
     my_peer_id = ctx["_my_peer_id"]
     room_id = ctx["_room_id"]
     if ctx["room_service"].update_heartbeat(room_id, my_peer_id):
+        response = {"type": "pong"}
+        if "clientTs" in data:
+            response["clientTs"] = data["clientTs"]
         try:
-            await websocket.send(json.dumps({"type": "pong"}))
-        except Exception:
-            pass
+            await websocket.send(json.dumps(response))
+        except Exception as e:
+            _track_error(ctx, 'heartbeat', 'send pong failed', e)
 
 
 @register("time-request")
@@ -464,8 +482,8 @@ async def h_time_request(websocket, data, ctx):
             "ntpServer": ctx["ntp_config"]["server"],
             "ntpValid": ctx["ntp_config"].get("_ntp_valid", False),
         }))
-    except Exception:
-        pass
+    except Exception as e:
+        _track_error(ctx, 'time-sync', 'send time-sync failed', e)
 
 
 @register("ntp-config")
@@ -521,8 +539,8 @@ async def h_relay_data(websocket, data, ctx):
         await ctx["rooms"][rid][target]["ws"].send(json.dumps(out))
         ctx["debug"](f"→ TX relay-data to={target} from={my_peer_id} ({payload.get('type','?')})")
         ctx["log"]('RELAY', f'{my_peer_id} → {target} ({payload.get("type","?")})')
-    except Exception:
-        pass
+    except Exception as e:
+        _track_error(ctx, 'relay', f'data to {target} failed', e)
 
 
 @register("relay-chunk")
@@ -542,8 +560,8 @@ async def h_relay_chunk(websocket, data, ctx):
         return
     try:
         await ctx["rooms"][rid][target]["ws"].send(json.dumps(chunk_data))
-    except Exception:
-        pass
+    except Exception as e:
+        _track_error(ctx, 'relay', f'chunk to {target} failed', e)
 
 
 @register("file-cancel")
@@ -559,8 +577,8 @@ async def h_file_cancel(websocket, data, ctx):
                 "fileId": data.get("fileId"),
             }))
             ctx["debug"](f"→ TX file-cancel to={target} from={my_peer_id} fileId={data.get('fileId')}")
-        except Exception:
-            pass
+        except Exception as e:
+            _track_error(ctx, 'relay', f'file-cancel to {target} failed', e)
 
 
 @register("admin-login")
@@ -800,6 +818,7 @@ async def h_keymgmt_delete(websocket, data, ctx):
 
 
 
+@register("dump")
 async def h_dump(websocket, data, ctx):
     my_peer_id = ctx["_my_peer_id"]
     iso_ts = datetime.now(timezone.utc).isoformat()
@@ -826,6 +845,83 @@ async def h_dump(websocket, data, ctx):
     }))
     ctx["log"]('DUMP', f'Dump requested by {my_peer_id}')
     ctx["debug"](f"→ TX dump: {len(ctx['room_data'])} rooms, {total_notices} notices, {total_boards} boards")
+
+
+# ──────────────────────────────────────────────
+# Diagnostic handler
+# ──────────────────────────────────────────────
+
+@register("diagnostic")
+async def h_diagnostic(websocket, data, ctx):
+    """Return comprehensive system diagnostic snapshot."""
+    import os, time as time_module
+
+    # Event loop delay test — schedule a callback and measure lag
+    loop_delay = 0
+    try:
+        t0 = time_module.monotonic()
+        await asyncio.sleep(0)  # yield to event loop
+        t1 = time_module.monotonic()
+        loop_delay = round((t1 - t0) * 1000, 2)  # ms
+    except Exception:
+        loop_delay = -1
+
+    # DB ping
+    db_ok = False
+    db_latency = -1
+    try:
+        import sqlite3
+        t0 = time_module.monotonic()
+        conn = sqlite3.connect(ctx.get("DB_PATH", "clipper_data.db"))
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+        t1 = time_module.monotonic()
+        db_ok = True
+        db_latency = round((t1 - t0) * 1000, 2)
+    except Exception:
+        db_ok = False
+
+    # Memory (approximate via /proc/self/status on Linux, fallback for macOS)
+    mem_mb = 0
+    try:
+        import resource
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        mem_mb = round(usage.ru_maxrss / 1024, 1)  # KB → MB
+    except Exception:
+        mem_mb = -1
+
+    # NTP status
+    ntp_enabled = ctx.get("ntp_config", {}).get("enabled", False)
+    ntp_offset = ctx.get("ntp_config", {}).get("offset", 0)
+    ntp_valid = ctx.get("ntp_config", {}).get("_ntp_valid", False)
+
+    # Error counts from ctx error counter (populated by D-2)
+    error_counts = ctx.get("_error_counts", {})
+
+    # Room stats
+    active_rooms = len(ctx.get("rooms", {}))
+    online_peers = sum(len(p) for p in ctx.get("rooms", {}).values())
+    data_rooms = len(ctx.get("room_data", {}))
+
+    await websocket.send(json.dumps({
+        "type": "diagnostic-result",
+        "server": {
+            "version": "1.1.0",
+            "uptime": int(time_module.time() - ctx.get("_start_time", time_module.time())),
+            "activeRooms": active_rooms,
+            "onlinePeers": online_peers,
+            "dataRooms": data_rooms,
+            "debugMode": ctx.get("DEBUG", False),
+            "loopDelayMs": loop_delay,
+            "memMB": mem_mb,
+            "dbOk": db_ok,
+            "dbLatencyMs": db_latency,
+            "ntpEnabled": ntp_enabled,
+            "ntpOffset": round(ntp_offset, 3),
+            "ntpValid": ntp_valid,
+        },
+        "errors": error_counts,
+    }))
 
 
 # ──────────────────────────────────────────────

@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 import websockets
 import mimetypes
 
-from services.ws_router import ROUTES
+from services.ws_router import ROUTES, _track_error
 from services.persistence import Persistence
 from services.chat_service import ChatService
 from services.notice_service import NoticeService
@@ -60,6 +60,8 @@ room_service = RoomService(persistence, rooms, peer_ids, MAX_PEERS_PER_ROOM)
 
 # Global key management service instance
 keymgmt_service = KeyMgmtService(persistence)
+# Error counts for diagnostic snapshot
+_error_counts = {}
 
 MAX_PEERS_PER_ROOM = 50
 CHAT_RETENTION_DAYS = 7
@@ -754,7 +756,7 @@ async def handler(websocket):
         "DEBUG": DEBUG,
         "LOG_DIR": LOG_DIR,
         "DB_PATH": DB_PATH,
-        "LOG_RETENTION_HOURS": LOG_RETENTION_HOURS,
+        "LOG_RETENTION_HOURS": LOG_RETENTION_HOURS,        "_error_counts": _error_counts,
     }
 
     try:
@@ -774,6 +776,7 @@ async def handler(websocket):
 
     except websockets.exceptions.ConnectionClosed:
         _debug(f"WebSocket connection closed for {my_peer_id}")
+        _track_error(ctx, 'ws', 'connection closed for ' + str(my_peer_id))
         pass
     finally:
         was_removed, room_now_empty = room_service.remove_peer(room_id, my_peer_id)
