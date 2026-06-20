@@ -724,6 +724,9 @@
           if (data.peers) {
             const oldIds = new Set(this._state.peers.map(p => p.peerId));
             const newIds = new Set(data.peers.map(p => p.peerId));
+            // 建立舊名稱對照表（偵測名稱變更）
+            const oldNames = new Map();
+            this._state.peers.forEach(p => oldNames.set(p.peerId, p.displayName));
             // 離開的 peer
             this._state.peers.forEach(p => {
               if (!newIds.has(p.peerId)) {
@@ -733,7 +736,6 @@
                   if (ps.pc) try { ps.pc.close(); } catch (_) {}
                 }
                 this._peers.delete(p.peerId);
-                // Preserve displayName before deletion
                 const leftInfo1 = { peerId: p.peerId, displayName: p.displayName || '' };
                 this._emit('peer-left', leftInfo1);
               }
@@ -744,11 +746,14 @@
               const existing = existingPeers.get(p.peerId);
               return [p.peerId, existing ? { ...p, pc: existing.pc, dc: existing.dc, connected: existing.connected, relay: existing.relay } : { ...p, pc: null, dc: null, connected: false, relay: false }];
             }));
-            // 新加入的 peer
+            // 新加入或名稱變更的 peer
             data.peers.forEach(p => {
               if (!oldIds.has(p.peerId)) {
                 this._emit('peer-joined', p);
                 this._connectToPeer(p.peerId);
+              } else if (oldNames.get(p.peerId) !== p.displayName) {
+                // 名稱已變更 → 發射 peer-updated 事件
+                this._emit('peer-updated', p);
               }
             });
           }
