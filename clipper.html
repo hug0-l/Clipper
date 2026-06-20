@@ -3275,6 +3275,11 @@ APP.state.persistedChatMessages = savedMessages;
 for (const msg of savedMessages) {
     renderChatMessage(msg.from, msg.text, msg.timestamp);
 }
+// Scroll to bottom after initial load
+requestAnimationFrame(() => {
+    const cm = document.getElementById('chatMessages');
+    if (cm) cm.scrollTop = cm.scrollHeight;
+});
 // ========== Checklist v2 ==========
 const CHECKLIST_COLORS = [
   { value: '#38bdf8', label: '天藍' },
