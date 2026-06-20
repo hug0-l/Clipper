@@ -4,6 +4,13 @@ import random
 import time
 from datetime import datetime, timezone
 
+from services.checklist_service import ChecklistService
+from services.persistence import Persistence
+
+
+# Module-level service instances
+checklist_service = ChecklistService(Persistence())
+
 ROUTES = {}
 
 def register(msg_type):
@@ -18,48 +25,36 @@ def register(msg_type):
 # Handler functions
 # ──────────────────────────────────────────────
 
-@register("generate")
-async def h_generate(websocket, data, ctx):
-    _ = random.randint(1000, 9999)
+    _ = ctx["room_service"].generate_room_code()
 
 
 @register("join")
 async def h_join(websocket, data, ctx):
+    rs = ctx["room_service"]
     rid = data.get("room")
     if not rid:
         await websocket.send(json.dumps({"type": "error", "message": "room is required"}))
         return
 
-    if rid in ctx["rooms"] and len(ctx["rooms"][rid]) >= ctx.get("MAX_PEERS_PER_ROOM", 50):
+    if rs.is_room_full(rid):
         await websocket.send(json.dumps({"type": "room_full", "room": rid}))
         return
 
     # Leave previous room if any
-    room_id = ctx["_room_id"]
-    my_peer_id = ctx["_my_peer_id"]
-    if room_id and room_id in ctx["rooms"] and my_peer_id:
-        ctx["rooms"][room_id].pop(my_peer_id, None)
-        ctx["peer_ids"].discard(my_peer_id)
-        if not ctx["rooms"][room_id]:
-            del ctx["rooms"][room_id]
-        else:
-            ctx["broadcast"](ctx["rooms"][room_id], {"type": "peer_left", "peerId": my_peer_id}, exclude=websocket)
+    old_room_id = ctx["_room_id"]
+    old_my_peer_id = ctx["_my_peer_id"]
+    was_left, room_now_empty = rs.leave_previous_room(old_room_id, old_my_peer_id)
+    if was_left and not room_now_empty:
+        ctx["broadcast"](
+            ctx["rooms"][old_room_id],
+            {"type": "peer_left", "peerId": old_my_peer_id},
+            exclude=websocket,
+        )
 
-    # Assign peer ID and join
+    # Join new room
     rid = data["room"]
-    my_peer_id = ctx["generate_peer_id"]()
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    if rid not in ctx["rooms"]:
-        ctx["rooms"][rid] = {}
-
-    ctx["rooms"][rid][my_peer_id] = {
-        "ws": websocket,
-        "joinedAt": now_iso,
-        "lastHeartbeat": time.time(),
-        "displayName": data.get("displayName", my_peer_id),
-    }
-    room_id = rid
+    display_name = data.get("displayName")
+    room_id, my_peer_id, peer_info = rs.add_peer(rid, websocket, display_name)
 
     # Send joined confirmation
     await websocket.send(json.dumps({
@@ -67,23 +62,19 @@ async def h_join(websocket, data, ctx):
         "room": room_id,
         "peerId": my_peer_id,
     }))
-    ctx["debug"](f"→ TX joined room={room_id} peerId={my_peer_id}")
+    ctx["debug"](f"\u2192 TX joined room={room_id} peerId={my_peer_id}")
 
     # If others are in the room, send room_peers to joiner and peer_joined to all existing members
-    other_peers = {pid: info for pid, info in ctx["rooms"][room_id].items() if pid != my_peer_id}
-    if other_peers:
-        peers_list = [
-            {"peerId": pid, "joinedAt": info["joinedAt"], "displayName": info.get("displayName", pid)}
-            for pid, info in other_peers.items()
-        ]
+    other_peers_list = rs.get_other_peers(room_id, my_peer_id)
+    if other_peers_list:
         await websocket.send(json.dumps({
             "type": "room_peers",
-            "peers": peers_list,
+            "peers": other_peers_list,
         }))
-        ctx["debug"](f"→ TX room_peers count={len(peers_list)} to={my_peer_id}")
+        ctx["debug"](f"\u2192 TX room_peers count={len(other_peers_list)} to={my_peer_id}")
 
         # Notify all existing peers
-        joiner_name = ctx["rooms"][room_id][my_peer_id].get("displayName", my_peer_id)
+        joiner_name = peer_info.get("displayName", my_peer_id)
         ctx["broadcast"](
             ctx["rooms"][room_id],
             {"type": "peer_joined", "peerId": my_peer_id, "displayName": joiner_name},
@@ -330,19 +321,16 @@ async def h_notice_pin(websocket, data, ctx):
 @register("checklistboard-create")
 async def h_checklistboard_create(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
-    ctx["room_data"][rid]["checklists"].append(data.get("board", {}))
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "checklistboard-create", "board": data.get("board", {})},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
-    ctx["log"]('CHECKLIST', f'{my_peer_id} created board in {rid}')
+    board = data.get("board", {})
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = checklist_service.create_board(ctx["room_data"][rid], rid, board, broadcast_fn, ctx["log"])
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("checklistboard-edit")
@@ -352,28 +340,11 @@ async def h_checklistboard_edit(websocket, data, ctx):
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
-    board_id = data.get("id")
-    for board in ctx["room_data"][rid]["checklists"]:
-        if board.get("id") == board_id:
-            if "title" in data:
-                board["title"] = data["title"]
-            if "category" in data:
-                board["category"] = data["category"]
-            if "tags" in data:
-                board["tags"] = data["tags"]
-            if "color" in data:
-                board["color"] = data["color"]
-            break
-    broadcast_msg = {
-        "type": "checklistboard-edit",
-        "id": board_id,
-        "title": data.get("title"),
-        "category": data.get("category"),
-        "tags": data.get("tags"),
-        "color": data.get("color"),
-    }
-    ctx["broadcast"](ctx["rooms"][rid], broadcast_msg, exclude=websocket)
-    ctx["save_state"]()
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = checklist_service.edit_board(ctx["room_data"][rid], rid, data, broadcast_fn)
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("checklistboard-delete")
@@ -383,18 +354,12 @@ async def h_checklistboard_delete(websocket, data, ctx):
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
-    del_id = data.get("id")
-    ctx["room_data"][rid]["checklists"] = [
-        b for b in ctx["room_data"][rid]["checklists"] if b.get("id") != del_id
-    ]
-    if del_id and del_id not in ctx["room_data"][rid]["deletedChecklistIds"]:
-        ctx["room_data"][rid]["deletedChecklistIds"].append(del_id)
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "checklistboard-delete", "id": del_id},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
+    board_id = data.get("id")
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = checklist_service.delete_board(ctx["room_data"][rid], rid, board_id, broadcast_fn)
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("checklistboard-pin")
@@ -406,22 +371,16 @@ async def h_checklistboard_pin(websocket, data, ctx):
     ctx["ensure_room_data"](rid)
     pin_id = data.get("id")
     pin_val = data.get("pinned", False)
-    for board in ctx["room_data"][rid]["checklists"]:
-        if board.get("id") == pin_id:
-            board["pinned"] = pin_val
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "checklistboard-pin", "id": pin_id, "pinned": pin_val},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = checklist_service.pin_board(ctx["room_data"][rid], rid, pin_id, pin_val, broadcast_fn)
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("checklistboard-remind")
 async def h_checklistboard_remind(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
@@ -429,18 +388,11 @@ async def h_checklistboard_remind(websocket, data, ctx):
     remind_id = data.get("id")
     remind_at = data.get("reminderAt")
     remind_title = data.get("reminderTitle", "")
-    for board in ctx["room_data"][rid]["checklists"]:
-        if board.get("id") == remind_id:
-            board["reminderAt"] = remind_at
-            board["reminderTitle"] = remind_title
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "checklistboard-remind", "id": remind_id, "reminderAt": remind_at, "reminderTitle": remind_title},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
-    ctx["log"]('CHECKLIST', f'{my_peer_id} set reminder for board {remind_id} in {rid}')
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = checklist_service.set_reminder(ctx["room_data"][rid], rid, remind_id, remind_at, remind_title, broadcast_fn, ctx["log"])
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("checklist-add")
@@ -452,16 +404,11 @@ async def h_checklist_add(websocket, data, ctx):
     ctx["ensure_room_data"](rid)
     checklist_id = data.get("checklistId")
     item = data.get("item", {})
-    for board in ctx["room_data"][rid]["checklists"]:
-        if board.get("id") == checklist_id:
-            board.setdefault("items", []).append(item)
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "checklist-add", "checklistId": checklist_id, "item": item},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = checklist_service.add_item(ctx["room_data"][rid], rid, checklist_id, item, broadcast_fn)
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("checklist-toggle")
@@ -475,20 +422,11 @@ async def h_checklist_toggle(websocket, data, ctx):
     toggle_id = data.get("id")
     checked = data.get("checked", False)
     checked_at = data.get("checkedAt", time.time() * 1000)
-    for board in ctx["room_data"][rid]["checklists"]:
-        if board.get("id") == checklist_id:
-            for item in board.get("items", []):
-                if item.get("id") == toggle_id:
-                    item["checked"] = checked
-                    item["checkedAt"] = checked_at
-                    break
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "checklist-toggle", "checklistId": checklist_id, "id": toggle_id, "checked": checked, "checkedAt": checked_at},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = checklist_service.toggle_item(ctx["room_data"][rid], rid, checklist_id, toggle_id, checked, checked_at, broadcast_fn)
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("checklist-delete")
@@ -500,45 +438,26 @@ async def h_checklist_delete(websocket, data, ctx):
     ctx["ensure_room_data"](rid)
     checklist_id = data.get("checklistId")
     del_id = data.get("id")
-    for board in ctx["room_data"][rid]["checklists"]:
-        if board.get("id") == checklist_id:
-            board["items"] = [
-                i for i in board.get("items", []) if i.get("id") != del_id
-            ]
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "checklist-delete", "checklistId": checklist_id, "id": del_id},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = checklist_service.delete_item(ctx["room_data"][rid], rid, checklist_id, del_id, broadcast_fn)
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
 
 
 @register("checklist-reset")
 async def h_checklist_reset(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
     board_id = data.get("id") or data.get("checklistId")
-    if not board_id:
-        await websocket.send(json.dumps({"type": "error", "message": "checklistId required"}))
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = checklist_service.reset_items(ctx["room_data"][rid], rid, board_id, broadcast_fn, ctx["log"])
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
         return
-    for board in ctx["room_data"][rid]["checklists"]:
-        if board.get("id") == board_id:
-            for item in board.get("items", []):
-                item["checked"] = False
-                item["checkedAt"] = None
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "checklist-reset", "id": board_id},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
-    ctx["log"]('CHECKLIST', f'{my_peer_id} reset all items in board {board_id} in {rid}')
 
 
 @register("state-get")
@@ -596,8 +515,7 @@ async def h_chat_history(websocket, data, ctx):
 async def h_ping(websocket, data, ctx):
     my_peer_id = ctx["_my_peer_id"]
     room_id = ctx["_room_id"]
-    if my_peer_id and room_id and room_id in ctx["rooms"] and my_peer_id in ctx["rooms"][room_id]:
-        ctx["rooms"][room_id][my_peer_id]["lastHeartbeat"] = time.time()
+    if ctx["room_service"].update_heartbeat(room_id, my_peer_id):
         try:
             await websocket.send(json.dumps({"type": "pong"}))
         except Exception:
@@ -655,18 +573,10 @@ async def h_ntp_config(websocket, data, ctx):
     if not rid or rid not in ctx["rooms"] or not name or not my_peer_id:
         await websocket.send(json.dumps({"type": "error", "message": "invalid register-name"}))
         return
-    # Check for duplicate names — use _N suffix starting from 2
-    final_name = name
-    counter = 1
-    while True:
-        has_conflict = any(info.get("displayName", "") == final_name for pid, info in ctx["rooms"][rid].items() if pid != my_peer_id)
-        if not has_conflict:
-            break
-        counter += 1
-        final_name = f"{name}_{counter}"
-    ctx["rooms"][rid][my_peer_id]["displayName"] = final_name
-    await websocket.send(json.dumps({"type": "name-resolved", "displayName": final_name, "wasConflict": final_name != name}))
-    ctx["log"]('NAME', f'{my_peer_id} registered as "{final_name}"{" (was conflict: " + name + ")" if final_name != name else ""} in {rid}')
+    rs = ctx["room_service"]
+    final_name, was_conflict = rs.resolve_display_name(rid, my_peer_id, name)
+    await websocket.send(json.dumps({"type": "name-resolved", "displayName": final_name, "wasConflict": was_conflict}))
+    ctx["log"]('NAME', f'{my_peer_id} registered as "{final_name}"{" (was conflict: " + name + ")" if was_conflict else ""} in {rid}')
     await ctx["broadcast_peer_list"](rid)
 
 
@@ -900,133 +810,69 @@ async def h_admin_import(websocket, data, ctx):
 @register("keymgmt-create")
 async def h_keymgmt_create(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
     entry = data.get("entry", {})
-    if "keyManagements" not in ctx["room_data"][rid]:
-        ctx["room_data"][rid]["keyManagements"] = []
-    ctx["room_data"][rid]["keyManagements"].append(entry)
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "keymgmt-create", "entry": entry},
-        exclude=websocket,
-    )
-    ctx["log"]('KEYMGMT', f'{my_peer_id} created key entry in {rid}')
-    ctx["save_state"]()
+    def broadcast_fn(msg):
+        ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    ctx["keymgmt_service"].create_entry(ctx["room_data"][rid], rid, entry, broadcast_fn, ctx["log"])
 
 
 @register("keymgmt-edit")
 async def h_keymgmt_edit(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
-    edit_id = data.get("id")
-    for entry in ctx["room_data"][rid].get("keyManagements", []):
-        if entry.get("id") == edit_id:
-            if "label" in data:
-                entry["label"] = data["label"]
-            if "streamKey" in data:
-                entry["streamKey"] = data["streamKey"]
-            if "streamUrl" in data:
-                entry["streamUrl"] = data["streamUrl"]
-            if "currentProgram" in data:
-                entry["currentProgram"] = data["currentProgram"]
-            entry["updatedAt"] = data.get("updatedAt", time.time() * 1000)
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {
-            "type": "keymgmt-edit",
-            "id": edit_id,
-            "label": data.get("label"),
-            "streamKey": data.get("streamKey"),
-            "streamUrl": data.get("streamUrl"),
-            "currentProgram": data.get("currentProgram"),
-        },
-        exclude=websocket,
-    )
-    ctx["save_state"]()
-    ctx["log"]('KEYMGMT', f'{my_peer_id} edited key entry {edit_id} in {rid}')
+    def broadcast_fn(msg):
+        ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    ctx["keymgmt_service"].edit_entry(ctx["room_data"][rid], rid, data, broadcast_fn, ctx["log"])
 
 
 @register("keymgmt-toggle-active")
 async def h_keymgmt_toggle_active(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
     toggle_id = data.get("id")
-    new_active = False
-    for entry in ctx["room_data"][rid].get("keyManagements", []):
-        if entry.get("id") == toggle_id:
-            entry["isActive"] = not entry.get("isActive", False)
-            new_active = entry["isActive"]
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "keymgmt-toggle-active", "id": toggle_id, "isActive": new_active},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
-    ctx["log"]('KEYMGMT', f'{my_peer_id} toggled key entry {toggle_id} in {rid}')
+    def broadcast_fn(msg):
+        ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    ctx["keymgmt_service"].toggle_active(ctx["room_data"][rid], rid, toggle_id, broadcast_fn, ctx["log"])
 
 
 @register("keymgmt-set-program")
 async def h_keymgmt_set_program(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
     prog_id = data.get("id")
     current_program = data.get("currentProgram", "")
-    for entry in ctx["room_data"][rid].get("keyManagements", []):
-        if entry.get("id") == prog_id:
-            entry["currentProgram"] = current_program
-            entry["updatedAt"] = time.time() * 1000
-            break
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "keymgmt-set-program", "id": prog_id, "currentProgram": current_program},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
-    ctx["log"]('KEYMGMT', f'{my_peer_id} set program for key entry {prog_id} in {rid}')
+    def broadcast_fn(msg):
+        ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    ctx["keymgmt_service"].set_program(ctx["room_data"][rid], rid, prog_id, current_program, broadcast_fn, ctx["log"])
 
 
 @register("keymgmt-delete")
 async def h_keymgmt_delete(websocket, data, ctx):
     rid = data.get("room")
-    my_peer_id = ctx["_my_peer_id"]
     if not rid or rid not in ctx["rooms"]:
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
     del_id = data.get("id")
-    ctx["room_data"][rid]["keyManagements"] = [
-        e for e in ctx["room_data"][rid].get("keyManagements", []) if e.get("id") != del_id
-    ]
-    if del_id and del_id not in ctx["room_data"][rid]["deletedKeyIds"]:
-        ctx["room_data"][rid]["deletedKeyIds"].append(del_id)
-    ctx["broadcast"](
-        ctx["rooms"][rid],
-        {"type": "keymgmt-delete", "id": del_id},
-        exclude=websocket,
-    )
-    ctx["save_state"]()
-    ctx["log"]('KEYMGMT', f'{my_peer_id} deleted key entry {del_id} in {rid}')
+    def broadcast_fn(msg):
+        ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    ctx["keymgmt_service"].delete_entry(ctx["room_data"][rid], rid, del_id, broadcast_fn, ctx["log"])
 
 
-@register("dump")
+
 async def h_dump(websocket, data, ctx):
     my_peer_id = ctx["_my_peer_id"]
     iso_ts = datetime.now(timezone.utc).isoformat()
