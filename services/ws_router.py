@@ -5,11 +5,18 @@ import time
 from datetime import datetime, timezone
 
 from services.checklist_service import ChecklistService
+from services.notice_service import NoticeService
+from services.keymgmt_service import KeyMgmtService
+from services.chat_service import ChatService
 from services.persistence import Persistence
 
 
 # Module-level service instances
-checklist_service = ChecklistService(Persistence())
+_persistence = Persistence()
+checklist_service = ChecklistService(_persistence)
+notice_service = NoticeService(_persistence)
+keymgmt_service = KeyMgmtService(_persistence)
+chat_service = ChatService(_persistence)
 
 ROUTES = {}
 
@@ -25,7 +32,13 @@ def register(msg_type):
 # Handler functions
 # ──────────────────────────────────────────────
 
-    _ = ctx["room_service"].generate_room_code()
+@register("generate")
+async def h_generate(websocket, data, ctx):
+    code = ctx["room_service"].generate_room_code()
+    try:
+        await websocket.send(json.dumps({"type": "generated", "room": code}))
+    except Exception:
+        pass
 
 
 @register("join")
@@ -415,20 +428,9 @@ async def h_chat_history(websocket, data, ctx):
         await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
         return
     ctx["ensure_room_data"](rid)
+    cs = ctx["chat_service"]
     since = data.get("since")
-    if since is None:
-        retention = ctx["config"].get("chatRetentionDays", 7)
-        cutoff = (time.time() - retention * 86400) * 1000
-        filtered = [
-            m for m in ctx["room_data"][rid].get("chatMessages", [])
-            if _ts_val(m["timestamp"]) > cutoff and not m.get("deleted", False)
-        ]
-    else:
-        since_f = _ts_val(since) if since is not None else 0
-        filtered = [
-            m for m in ctx["room_data"][rid].get("chatMessages", [])
-            if _ts_val(m["timestamp"]) > since_f and not m.get("deleted", False)
-        ]
+    filtered = cs.get_history(ctx["room_data"][rid], rid, since)
     await websocket.send(json.dumps({
         "type": "chat-history-result",
         "messages": filtered,
