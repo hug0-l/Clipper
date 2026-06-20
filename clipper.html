@@ -1502,8 +1502,16 @@ footer input[type="text"] {
     <button class="btn btn-secondary sync-btn" id="btnSync" style="display:none;font-size:12px;padding:3px 8px;">🔄 同步</button>
 </footer>
 
+<!-- Clipper JS Core (order matters):
+     1. message-bus.js — Event bus (MessageBus)
+     2. ws-manager.js — WebSocket manager (WSManager)
+     3. module-base.js — Module base class (ClipperModule)
+     4. modules/*.js — Feature modules (loaded in future phases)
+-->
+
 <script src="js/core/message-bus.js"></script>
 <script src="js/core/ws-manager.js"></script>
+<script src="js/core/module-base.js"></script>
 <script>
 // Polyfill crypto.randomUUID for older browsers
 if (!crypto.randomUUID) {
