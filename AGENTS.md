@@ -11,12 +11,15 @@ This file provides guidance to AI agents when working with this repository.
 ## Architecture
 
 ```
-clipper.html          # Single-page application (SPA), ~4,550 lines
+clipper.html          # Single-page application (SPA), ~5,050 lines
                       # HTML + CSS + JS in one file. No bundler/framework.
-signal_server.py      # WebSocket signaling server, ~1,250 lines
+signal_server.py      # WebSocket signaling server, ~1,400 lines
                       # Handles: room mgmt, WebRTC signaling, WS relay,
                       # admin panel, NTP sync, SQLite persistence.
-                      # Built-in HTTP server on port 8766.
+                      # Built-in HTTP server on port 8766 + REST API.
+clipper-sdk.js        # Lightweight JS SDK (1,317 lines), 0 dependencies
+                      # Wraps Clipper WS protocol + WebRTC P2P
+protocol.md           # Full WS API specification (1,936 lines, 48 msg types)
 clipper_data.db       # SQLite database (auto-created at startup)
 logs/                 # Daily log files (auto-rotated, 24h retention)
 ```
@@ -57,3 +60,7 @@ logs/                 # Daily log files (auto-rotated, 24h retention)
 - **離線唯讀模式**: WS 斷線時自動呼叫 `setReadOnly(true)` 鎖定所有協作功能；重連成功後（`joined` 事件）自動解除。`setReadOnly()` 實作在獨立的 `Read-Only Mode` 區塊中。手動中斷（`disconnect()`）不觸發唯讀。
 - **幽靈復活防護**: 伺服器記錄 `deletedPostIds`/`deletedChecklistIds`/`deletedKeyIds`，`room-state` 回應中攜帶這些 ID。前端合併時先過濾已被伺服器刪除的項目，再執行現有合併邏輯。向後相容：舊伺服器不發 `deleted*Ids` 則跳過過濾。
 - **自動跳轉瀏覽器**: `signal_server.py` 啟動完成後自動呼叫 `webbrowser.open('http://localhost:8766')`，headless 環境優雅降級。
+- **SDK WebRTC P2P**: `clipper-sdk.js` 有完整 P2P 支援（`RTCPeerConnection` + `DataChannel`）。低 peerId 者發起 `offer`，高者等待。自動降級 WS relay。原生 `clipper.html` 也有同樣實作。
+- **SDK 檔案傳輸佇列**: `sendFile()` 放入 `_fileSendQueue`，依序傳送。`_fileSending` 旗標避免並行 flood。
+- **REST API**: `signal_server.py` 在 port 8766 提供 `GET /api/health`、`GET /api/rooms/:room/state`、`POST|PUT|DELETE /api/rooms/:room/notice` 等端點。CORS `*`。
+- **peerId 不顯示給用戶**: 三個 codebase（clipper.html / clipper-sdk.js / countdownctrl）的所有 UI 文字只顯示 `displayName`。`peerId` 只用於內部識別（Map key、`btn.title`）。

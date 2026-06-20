@@ -18,9 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **🧟 幽靈復活防護** — 伺服器記錄已刪除的 IDs，重連時 room-state 合併自動過濾，防止已刪除的資料透過 localStorage 復活（R-5）
 - **🌐 自動跳轉瀏覽器** — 啟動 `signal_server.py` 後自動開啟 `http://localhost:8766` 客戶端頁面（R-6）
 - **📄 Clipper WebSocket API 協定文件** — 建立 `protocol.md`（1936 行），完整記錄 48 個 message types，含 Request/Response Schema、連線流程圖、錯誤處理（R-7）
-- **📦 clipper-sdk.js 輕量 SDK** — 820 行無外部依賴的 JavaScript SDK，3 行程式碼即可將外部應用接入 Clipper 即時通訊。支援事件驅動、自動重連、離線唯讀保護（R-8）
+- **📦 clipper-sdk.js 輕量 SDK** (1,317行) — 無外部依賴的 JavaScript SDK，3 行程式碼即可將外部應用接入 Clipper（R-8）
 - **🌐 REST API 橋接層** — signal_server.py HTTP 伺服器加入 REST 端點：health check、房間狀態查詢、公告/檢查清單/密鑰管理 CRUD。CORS 支援，向後相容靜態檔案服務（R-9）
 - **🔗 VCC PRE Clipper 分頁整合** — countdownctrl 的 Clipper IM 分頁改用 `clipper-sdk.js` 對接完整協議，預設名稱 VPRE，聊天訊息與完整 Clipper 客戶端互通（R-10）
+- **📁 SDK 檔案傳輸** — `sendFile()` + queue 佇列 + `file-progress`/`file-sent`/`file-error` 事件。支援 SHA-256 checksum 完整性驗證（F-1）
+- **📁 countdownctrl 檔案傳輸 UI** — 先選對象再拖放，上傳/下載雙向進度條（F-1 後續）
+- **🌐 WebRTC P2P 支援 (SDK)** — `RTCPeerConnection` + DataChannel，聊天與檔案 chunks 走 P2P 直連，0% base64 開銷，失敗自動降級 WS relay（P2P-1）
+- **🔒 用戶端隱私改善** — 所有 UI 隱藏 `peerId`，只顯示 displayName（native + SDK + countdownctrl）
+- **🔄 SDK 增加重試機制** — `retryFile()`、`getSendQueue()`、`getReceiveQueue()` 佇列查詢
+- **🐛 timestamp 型別安全** — server 端 `_ts_val()` 統一處理 int/str/ISO 時間格式
 
 ### 🐛 修復
 
