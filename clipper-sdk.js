@@ -1,0 +1,820 @@
+/**
+ * ClipperSDK — 輕量級 Clipper WebSocket 協議 JS SDK
+ *
+ * 無外部依賴，單一檔案，約 450 行。
+ *
+ * 使用方式：
+ *   const clipper = new ClipperSDK({ server: 'ws://localhost:8765', room: '1234', displayName: '計時器' });
+ *   clipper.on('connected', () => {});
+ *   clipper.connect();
+ *
+ * 事件列表：
+ *   connected, disconnected, chat, notice, peer-joined, peer-left,
+ *   state, error, readonly
+ */
+(function (global) {
+  'use strict';
+
+  // ========== EventEmitter ==========
+
+  class EventEmitter {
+    constructor() {
+      this._events = {};
+    }
+
+    on(event, fn) {
+      (this._events[event] || (this._events[event] = [])).push(fn);
+      return this;
+    }
+
+    off(event, fn) {
+      const list = this._events[event];
+      if (!list) return this;
+      if (!fn) {
+        delete this._events[event];
+        return this;
+      }
+      this._events[event] = list.filter(f => f !== fn);
+      return this;
+    }
+
+    _emit(event, ...args) {
+      const list = this._events[event];
+      if (list) list.slice().forEach(fn => fn(...args));
+    }
+  }
+
+  // ========== ClipperSDK ==========
+
+  class ClipperSDK extends EventEmitter {
+    /**
+     * @param {Object} opts
+     * @param {string} opts.server   — WebSocket URL, 如 'ws://localhost:8765'
+     * @param {string} [opts.room]   — 4 位數字配對碼, 不指定則自動產生
+     * @param {string} [opts.displayName] — 顯示名稱
+     * @param {number} [opts.reconnectMaxDelay=30000] — 重連最大間隔(ms)
+     * @param {number} [opts.heartbeatInterval=10000]  — 心跳間隔(ms)
+     */
+    constructor(opts) {
+      super();
+      if (!opts || !opts.server) {
+        throw new Error('ClipperSDK: server URL is required');
+      }
+
+      this.server = opts.server;
+      this.room = opts.room || null;
+      this.displayName = opts.displayName || '';
+      this.reconnectMaxDelay = opts.reconnectMaxDelay || 30000;
+      this.heartbeatInterval = opts.heartbeatInterval || 10000;
+
+      // 內部狀態
+      this._ws = null;
+      this._peerId = null;
+      this._connected = false;
+      this._readOnly = false;
+      this._manualDisconnect = false;
+      this._reconnectTimer = null;
+      this._reconnectDelay = 1000;
+      this._heartbeatTimer = null;
+      this._pending = {};
+
+      // 快取資料
+      this._state = {
+        room: null,
+        noticePosts: [],
+        checklists: [],
+        keyManagements: [],
+        peers: [],
+        chatMessages: [],
+        serverTime: 0,
+        ntpOffset: 0,
+      };
+    }
+
+    // ==================== 連線管理 ====================
+
+    /**
+     * 建立 WebSocket 連線 → 自動 join room
+     */
+    connect() {
+      if (this._ws && (this._ws.readyState === WebSocket.OPEN || this._ws.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      this._manualDisconnect = false;
+      this._readOnly = false;
+
+      try {
+        this._ws = new WebSocket(this.server);
+      } catch (err) {
+        this._emit('error', err);
+        this._scheduleReconnect();
+        return;
+      }
+
+      this._ws.onopen = () => {
+        this._connected = true;
+        this._reconnectDelay = 1000; // reset backoff
+        this._emit('connected');
+
+        // Auto-join: 若已有 room code 直接 join, 否則 generate
+        if (this.room) {
+          this._send({ type: 'join', room: this.room, displayName: this.displayName });
+        } else {
+          this._send({ type: 'generate' });
+        }
+      };
+
+      this._ws.onmessage = (evt) => {
+        let data;
+        try {
+          data = JSON.parse(evt.data);
+        } catch (_) {
+          return;
+        }
+        this._handleMessage(data);
+      };
+
+      this._ws.onclose = () => {
+        this._connected = false;
+        this._stopHeartbeat();
+        this._emit('disconnected');
+
+        if (!this._manualDisconnect) {
+          this._readOnly = true;
+          this._emit('readonly', true);
+          this._scheduleReconnect();
+        }
+      };
+
+      this._ws.onerror = (err) => {
+        this._emit('error', err);
+      };
+    }
+
+    /**
+     * 手動斷線（不觸發 readonly）
+     */
+    disconnect() {
+      this._manualDisconnect = true;
+      this._stopHeartbeat();
+      this._cancelReconnect();
+      this._readOnly = false;
+      this._emit('readonly', false);
+
+      if (this._ws) {
+        try { this._ws.close(); } catch (_) { /* ignore */ }
+        this._ws = null;
+      }
+      this._connected = false;
+      this._peerId = null;
+    }
+
+    // ==================== 唯讀狀態 ====================
+
+    get readOnly() {
+      return this._readOnly;
+    }
+
+    get connected() {
+      return this._connected;
+    }
+
+    get peerId() {
+      return this._peerId;
+    }
+
+    // ==================== 公開方法 ====================
+
+    /**
+     * 發送聊天訊息
+     * @param {string} text
+     * @returns {boolean} 是否成功發送
+     */
+    sendChat(text) {
+      if (!text || !this._connected || !this._state.room) return false;
+      const msg = {
+        from: this.displayName || this._peerId,
+        text: text,
+        timestamp: Date.now(),
+      };
+      // Optimistic local store
+      this._state.chatMessages.push(msg);
+      this._emit('chat', msg);
+      this._send({
+        type: 'relay-data',
+        room: this._state.room,
+        data: {
+          type: 'chat',
+          from: msg.from,
+          text: msg.text,
+          timestamp: msg.timestamp,
+          msgId: this._uuid(),
+        },
+      });
+      return true;
+    }
+
+    /**
+     * 建立公告
+     */
+    createNotice(title, content, category, tags) {
+      if (!this._connected || !this._state.room) return false;
+      const post = {
+        id: this._uuid(),
+        title: title || '',
+        content: content || '',
+        author: this.displayName || this._peerId,
+        category: category || '',
+        tags: tags || [],
+        color: '#38bdf8',
+        pinned: false,
+        timestamp: Date.now(),
+      };
+      // Optimistic local update (server broadcasts to other peers only)
+      this._state.noticePosts = this._state.noticePosts.filter(p => p.id !== post.id);
+      this._state.noticePosts.push(post);
+      this._emit('notice', post);
+      this._send({ type: 'notice-create', room: this._state.room, post });
+      return true;
+    }
+
+    /**
+     * 編輯公告
+     */
+    editNotice(id, updates) {
+      if (!this._connected || !this._state.room || !id) return false;
+      this._send({
+        type: 'notice-edit',
+        room: this._state.room,
+        id,
+        ...updates,
+        editedAt: Date.now(),
+      });
+      return true;
+    }
+
+    /**
+     * 刪除公告
+     */
+    deleteNotice(id) {
+      if (!this._connected || !this._state.room || !id) return false;
+      this._send({ type: 'notice-delete', room: this._state.room, id });
+      return true;
+    }
+
+    /**
+     * 建立檢查清單 Board
+     */
+    createChecklist(title, category, tags, color) {
+      if (!this._connected || !this._state.room) return false;
+      const board = {
+        id: this._uuid(),
+        title: title || '',
+        category: category || '',
+        tags: tags || [],
+        color: color || '#38bdf8',
+        pinned: false,
+        createdBy: this.displayName || this._peerId,
+        createdAt: Date.now(),
+        items: [],
+      };
+      // Optimistic local update
+      this._state.checklists = this._state.checklists.filter(b => b.id !== board.id);
+      this._state.checklists.push(board);
+      this._send({ type: 'checklistboard-create', room: this._state.room, board });
+      return true;
+    }
+
+    /**
+     * 在 Board 中新增項目
+     */
+    addChecklistItem(boardId, text) {
+      if (!this._connected || !this._state.room || !boardId) return false;
+      const item = {
+        id: this._uuid(),
+        text: text || '',
+        addedBy: this.displayName || this._peerId,
+        checked: false,
+        checkedAt: null,
+        createdAt: Date.now(),
+      };
+      this._send({ type: 'checklist-add', room: this._state.room, checklistId: boardId, item });
+      return true;
+    }
+
+    /**
+     * 切換項目勾選狀態
+     */
+    toggleChecklistItem(boardId, itemId, checked) {
+      if (!this._connected || !this._state.room || !boardId || !itemId) return false;
+      this._send({
+        type: 'checklist-toggle',
+        room: this._state.room,
+        checklistId: boardId,
+        id: itemId,
+        checked: !!checked,
+        checkedAt: checked ? Date.now() : null,
+      });
+      return true;
+    }
+
+    /**
+     * 刪除 Board 中的項目
+     */
+    deleteChecklistItem(boardId, itemId) {
+      if (!this._connected || !this._state.room || !boardId || !itemId) return false;
+      this._send({ type: 'checklist-delete', room: this._state.room, checklistId: boardId, id: itemId });
+      return true;
+    }
+
+    /**
+     * 建立密鑰項目
+     */
+    createKeyEntry(label, key, url, program) {
+      if (!this._connected || !this._state.room) return false;
+      const entry = {
+        id: this._uuid(),
+        label: label || '',
+        streamKey: key || '',
+        streamUrl: url || '',
+        currentProgram: program || '',
+        isActive: true,
+        updatedAt: Date.now(),
+      };
+      // Optimistic local update
+      this._state.keyManagements = this._state.keyManagements.filter(e => e.id !== entry.id);
+      this._state.keyManagements.push(entry);
+      this._send({ type: 'keymgmt-create', room: this._state.room, entry });
+      return true;
+    }
+
+    /**
+     * 編輯密鑰項目
+     */
+    editKeyEntry(id, updates) {
+      if (!this._connected || !this._state.room || !id) return false;
+      this._send({
+        type: 'keymgmt-edit',
+        room: this._state.room,
+        id,
+        ...updates,
+        updatedAt: Date.now(),
+      });
+      return true;
+    }
+
+    /**
+     * 刪除密鑰項目
+     */
+    deleteKeyEntry(id) {
+      if (!this._connected || !this._state.room || !id) return false;
+      this._send({ type: 'keymgmt-delete', room: this._state.room, id });
+      return true;
+    }
+
+    /**
+     * 切換密鑰啟用狀態
+     */
+    toggleKeyActive(id) {
+      if (!this._connected || !this._state.room || !id) return false;
+      this._send({ type: 'keymgmt-toggle-active', room: this._state.room, id });
+      return true;
+    }
+
+    /**
+     * 請求最新房間狀態 (Promise)
+     * @returns {Promise<Object>}
+     */
+    fetchState() {
+      return new Promise((resolve, reject) => {
+        if (!this._connected || !this._state.room) {
+          reject(new Error('Not connected'));
+          return;
+        }
+        const reqId = this._uuid();
+        const timeout = setTimeout(() => {
+          delete this._pending[reqId];
+          reject(new Error('fetchState timeout'));
+        }, 10000);
+
+        this._pending[reqId] = (state) => {
+          clearTimeout(timeout);
+          delete this._pending[reqId];
+          resolve(state);
+        };
+
+        this._send({ type: 'state-get', room: this._state.room });
+      });
+    }
+
+    // ==================== 資料讀取 ====================
+
+    getNotices() {
+      return this._state.noticePosts.slice();
+    }
+
+    getChecklists() {
+      return this._state.checklists.slice();
+    }
+
+    getKeyEntries() {
+      return this._state.keyManagements.slice();
+    }
+
+    getChatMessages() {
+      return this._state.chatMessages.slice();
+    }
+
+    // ==================== 內部：訊息處理 ====================
+
+    _handleMessage(data) {
+      const type = data.type;
+
+      switch (type) {
+
+        // ---- 房間與連線 ----
+        case 'generated':
+          this.room = data.room;
+          this._state.room = data.room;
+          this._send({ type: 'join', room: data.room, displayName: this.displayName });
+          break;
+
+        case 'joined':
+          this._peerId = data.peerId;
+          this._state.room = data.room;
+          if (!this.room) this.room = data.room;
+          // 解除唯讀
+          if (this._readOnly) {
+            this._readOnly = false;
+            this._emit('readonly', false);
+          }
+          // 發送註冊、狀態、時間請求
+          this._send({ type: 'register-name', room: data.room, displayName: this.displayName });
+          this._send({ type: 'state-get', room: data.room });
+          this._send({ type: 'time-request' });
+          this._startHeartbeat();
+          break;
+
+        case 'room_full':
+          this._emit('error', new Error('Room is full'));
+          break;
+
+        case 'error':
+          this._emit('error', new Error(data.message || 'Unknown error'));
+          break;
+
+        // ---- 名稱 ----
+        case 'name-resolved':
+          this.displayName = data.displayName;
+          break;
+
+        // ---- 房間狀態 ----
+        case 'room-state':
+          this._mergeState(data);
+          this._emit('state', this._getPublicState());
+          // resolve pending fetchState
+          for (const id of Object.keys(this._pending)) {
+            this._pending[id](this._getPublicState());
+          }
+          break;
+
+        // ---- 時間同步 ----
+        case 'time-sync':
+          this._state.serverTime = data.serverTime;
+          this._state.ntpOffset = data.serverTime - Date.now();
+          break;
+
+        // ---- 心跳 ----
+        case 'pong':
+          // 心跳確認，無需特殊處理
+          break;
+
+        // ---- 成員管理 ----
+        case 'room_peers':
+          if (data.peers) {
+            this._state.peers = data.peers;
+            data.peers.forEach(p => this._emit('peer-joined', p));
+          }
+          break;
+
+        case 'peer-list':
+          if (data.peers) {
+            const oldIds = new Set(this._state.peers.map(p => p.peerId));
+            const newIds = new Set(data.peers.map(p => p.peerId));
+            // 離開的 peer
+            this._state.peers.forEach(p => {
+              if (!newIds.has(p.peerId)) this._emit('peer-left', p.peerId);
+            });
+            this._state.peers = data.peers;
+            // 新加入的 peer
+            data.peers.forEach(p => {
+              if (!oldIds.has(p.peerId)) this._emit('peer-joined', p);
+            });
+          }
+          break;
+
+        case 'peer_joined':
+          this._emit('peer-joined', { peerId: data.peerId, displayName: data.displayName });
+          break;
+
+        case 'peer_left':
+          this._emit('peer-left', data.peerId);
+          break;
+
+        // ---- 公告廣播 ----
+        case 'notice-create':
+          if (data.post) {
+            this._state.noticePosts = this._state.noticePosts.filter(p => p.id !== data.post.id);
+            this._state.noticePosts.push(data.post);
+            this._emit('notice', data.post);
+          }
+          break;
+
+        case 'notice-edit':
+          {
+            const post = this._state.noticePosts.find(p => p.id === data.id);
+            if (post) {
+              if (data.title !== undefined) post.title = data.title;
+              if (data.content !== undefined) post.content = data.content;
+              if (data.category !== undefined) post.category = data.category;
+              if (data.tags !== undefined) post.tags = data.tags;
+              if (data.color !== undefined) post.color = data.color;
+              post.editedAt = data.editedAt;
+              this._emit('notice', post);
+            }
+          }
+          break;
+
+        case 'notice-delete':
+          this._state.noticePosts = this._state.noticePosts.filter(p => p.id !== data.id);
+          break;
+
+        case 'notice-pin':
+          {
+            const post = this._state.noticePosts.find(p => p.id === data.id);
+            if (post) {
+              post.pinned = data.pinned;
+              this._emit('notice', post);
+            }
+          }
+          break;
+
+        // ---- 檢查清單廣播 ----
+        case 'checklistboard-create':
+          if (data.board) {
+            this._state.checklists = this._state.checklists.filter(b => b.id !== data.board.id);
+            this._state.checklists.push(data.board);
+          }
+          break;
+
+        case 'checklistboard-edit':
+          {
+            const board = this._state.checklists.find(b => b.id === data.id);
+            if (board) {
+              if (data.title !== undefined) board.title = data.title;
+              if (data.category !== undefined) board.category = data.category;
+              if (data.tags !== undefined) board.tags = data.tags;
+              if (data.color !== undefined) board.color = data.color;
+            }
+          }
+          break;
+
+        case 'checklistboard-delete':
+          this._state.checklists = this._state.checklists.filter(b => b.id !== data.id);
+          break;
+
+        case 'checklistboard-pin':
+          {
+            const board = this._state.checklists.find(b => b.id === data.id);
+            if (board) board.pinned = data.pinned;
+          }
+          break;
+
+        case 'checklistboard-remind':
+          {
+            const board = this._state.checklists.find(b => b.id === data.id);
+            if (board) {
+              board.reminderAt = data.reminderAt;
+              board.reminderTitle = data.reminderTitle;
+            }
+          }
+          break;
+
+        case 'checklist-add':
+          if (data.checklistId && data.item) {
+            const board = this._state.checklists.find(b => b.id === data.checklistId);
+            if (board) {
+              board.items = board.items.filter(i => i.id !== data.item.id);
+              board.items.push(data.item);
+            }
+          }
+          break;
+
+        case 'checklist-toggle':
+          if (data.checklistId && data.id) {
+            const board = this._state.checklists.find(b => b.id === data.checklistId);
+            if (board) {
+              const item = board.items.find(i => i.id === data.id);
+              if (item) {
+                item.checked = data.checked;
+                item.checkedAt = data.checkedAt;
+              }
+            }
+          }
+          break;
+
+        case 'checklist-delete':
+          if (data.checklistId && data.id) {
+            const board = this._state.checklists.find(b => b.id === data.checklistId);
+            if (board) {
+              board.items = board.items.filter(i => i.id !== data.id);
+            }
+          }
+          break;
+
+        case 'checklist-reset':
+          {
+            const board = this._state.checklists.find(b => b.id === data.id || b.id === data.checklistId);
+            if (board && board.items) {
+              board.items.forEach(i => { i.checked = false; i.checkedAt = null; });
+            }
+          }
+          break;
+
+        // ---- 密鑰廣播 ----
+        case 'keymgmt-create':
+          if (data.entry) {
+            this._state.keyManagements = this._state.keyManagements.filter(e => e.id !== data.entry.id);
+            this._state.keyManagements.push(data.entry);
+          }
+          break;
+
+        case 'keymgmt-edit':
+          {
+            const entry = this._state.keyManagements.find(e => e.id === data.id);
+            if (entry) {
+              if (data.label !== undefined) entry.label = data.label;
+              if (data.streamKey !== undefined) entry.streamKey = data.streamKey;
+              if (data.streamUrl !== undefined) entry.streamUrl = data.streamUrl;
+              if (data.currentProgram !== undefined) entry.currentProgram = data.currentProgram;
+            }
+          }
+          break;
+
+        case 'keymgmt-delete':
+          this._state.keyManagements = this._state.keyManagements.filter(e => e.id !== data.id);
+          break;
+
+        case 'keymgmt-toggle-active':
+          {
+            const entry = this._state.keyManagements.find(e => e.id === data.id);
+            if (entry) entry.isActive = data.isActive;
+          }
+          break;
+
+        case 'keymgmt-set-program':
+          {
+            const entry = this._state.keyManagements.find(e => e.id === data.id);
+            if (entry) entry.currentProgram = data.currentProgram;
+          }
+          break;
+
+        // ---- WS 中繼（聊天等） ----
+        case 'relay-data':
+          if (data.data && data.data.type === 'chat') {
+            const chatMsg = {
+              from: data.data.from || data.from,
+              text: data.data.text,
+              timestamp: data.data.timestamp,
+            };
+            this._state.chatMessages.push(chatMsg);
+            this._emit('chat', chatMsg);
+          }
+          break;
+
+        // ---- 未知類型 ----
+        default:
+          // 忽略已知但未處理的類型，未知類型也靜默
+          break;
+      }
+    }
+
+    // ==================== 內部：狀態合併 ====================
+
+    _mergeState(data) {
+      // 過濾已刪除 ID（防幽靈復活）
+      if (data.deletedNoticeIds) {
+        const delSet = new Set(data.deletedNoticeIds);
+        this._state.noticePosts = this._state.noticePosts.filter(p => !delSet.has(p.id));
+      }
+      if (data.deletedChecklistIds) {
+        const delSet = new Set(data.deletedChecklistIds);
+        this._state.checklists = this._state.checklists.filter(b => !delSet.has(b.id));
+      }
+      if (data.deletedKeyIds) {
+        const delSet = new Set(data.deletedKeyIds);
+        this._state.keyManagements = this._state.keyManagements.filter(e => !delSet.has(e.id));
+      }
+
+      // 合併（伺服器優先 + 保留本地特有）
+      if (data.noticePosts) {
+        const serverIds = new Set(data.noticePosts.map(p => p.id));
+        const localOnly = this._state.noticePosts.filter(p => !serverIds.has(p.id));
+        this._state.noticePosts = [...data.noticePosts, ...localOnly];
+      }
+      if (data.checklists) {
+        const serverIds = new Set(data.checklists.map(b => b.id));
+        const localOnly = this._state.checklists.filter(b => !serverIds.has(b.id));
+        this._state.checklists = [...data.checklists, ...localOnly];
+        // 深度合併 items
+        for (const serverBoard of data.checklists) {
+          const localBoard = this._state.checklists.find(b => b.id === serverBoard.id);
+          if (localBoard && serverBoard.items) {
+            const serverItemIds = new Set(serverBoard.items.map(i => i.id));
+            const localOnlyItems = localBoard.items.filter(i => !serverItemIds.has(i.id));
+            localBoard.items = [...serverBoard.items, ...localOnlyItems];
+          }
+        }
+      }
+      if (data.keyManagements) {
+        const serverIds = new Set(data.keyManagements.map(e => e.id));
+        const localOnly = this._state.keyManagements.filter(e => !serverIds.has(e.id));
+        this._state.keyManagements = [...data.keyManagements, ...localOnly];
+      }
+    }
+
+    _getPublicState() {
+      return {
+        room: this._state.room,
+        noticePosts: this._state.noticePosts.slice(),
+        checklists: this._state.checklists.slice(),
+        keyManagements: this._state.keyManagements.slice(),
+        peers: this._state.peers.slice(),
+      };
+    }
+
+    // ==================== 內部：心跳 ====================
+
+    _startHeartbeat() {
+      this._stopHeartbeat();
+      this._heartbeatTimer = setInterval(() => {
+        if (this._ws && this._ws.readyState === WebSocket.OPEN && this._state.room) {
+          this._send({ type: 'ping' });
+        }
+      }, this.heartbeatInterval);
+    }
+
+    _stopHeartbeat() {
+      if (this._heartbeatTimer) {
+        clearInterval(this._heartbeatTimer);
+        this._heartbeatTimer = null;
+      }
+    }
+
+    // ==================== 內部：重連 ====================
+
+    _scheduleReconnect() {
+      this._cancelReconnect();
+      this._reconnectTimer = setTimeout(() => {
+        this._reconnectDelay = Math.min(this._reconnectDelay * 2, this.reconnectMaxDelay);
+        this.connect();
+      }, this._reconnectDelay);
+    }
+
+    _cancelReconnect() {
+      if (this._reconnectTimer) {
+        clearTimeout(this._reconnectTimer);
+        this._reconnectTimer = null;
+      }
+    }
+
+    // ==================== 內部：傳送 ====================
+
+    _send(obj) {
+      if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+        this._ws.send(JSON.stringify(obj));
+        return true;
+      }
+      return false;
+    }
+
+    // ==================== 內部：工具 ====================
+
+    _uuid() {
+      // 簡易 UUID v4
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+  }
+
+  // ========== 匯出 ==========
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = ClipperSDK;
+  } else {
+    global.ClipperSDK = ClipperSDK;
+  }
+
+})(typeof window !== 'undefined' ? window : globalThis);

@@ -296,40 +296,314 @@ def _generate_peer_id():
             return pid
 
 
-# Mini HTTP server — serves clipper.html and static files on port 8766
+# Mini HTTP server — serves static files + REST API on port 8766
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+def _api_error_response(status, message):
+    return {"error": message}, status
+
+
+def _api_health():
+    """GET /api/health"""
+    return {
+        "status": "ok",
+        "version": "1.1.0",
+        "uptime": int(time.time() - _start_time),
+        "activeRooms": len(rooms),
+        "onlinePeers": sum(len(p) for p in rooms.values()),
+    }, 200
+
+
+def _api_room_state(room_id):
+    """GET /api/rooms/:room/state"""
+    _ensure_room_data(room_id)
+    rd = room_data[room_id]
+    return {
+        "noticePosts": rd.get("noticePosts", []),
+        "checklists": rd.get("checklists", []),
+        "keyManagements": rd.get("keyManagements", []),
+        "deletedNoticeIds": rd.get("deletedPostIds", []),
+        "deletedChecklistIds": rd.get("deletedChecklistIds", []),
+        "deletedKeyIds": rd.get("deletedKeyIds", []),
+    }, 200
+
+
+def _api_room_notice(room_id, method, query, body):
+    """POST/PUT/DELETE /api/rooms/:room/notice"""
+    _ensure_room_data(room_id)
+
+    if method == "POST":
+        data = json.loads(body) if body else {}
+        now_ms = int(time.time() * 1000)
+        post = {
+            "id": data.get("id", str(now_ms)),
+            "title": data.get("title", ""),
+            "content": data.get("content", ""),
+            "category": data.get("category", ""),
+            "tags": data.get("tags", []),
+            "author": data.get("author", ""),
+            "createdAt": now_ms,
+        }
+        room_data[room_id]["noticePosts"].append(post)
+        _save_state()
+        return {"success": True, "post": post}, 200
+
+    elif method == "PUT":
+        data = json.loads(body) if body else {}
+        post_id = query.get("id") or data.get("id")
+        if not post_id:
+            return _api_error_response(400, "id is required")
+        found = None
+        for post in room_data[room_id]["noticePosts"]:
+            if post.get("id") == post_id:
+                for key in ("title", "content", "category", "tags", "color"):
+                    if key in data:
+                        post[key] = data[key]
+                post["editedAt"] = data.get("editedAt", int(time.time() * 1000))
+                found = post
+                break
+        if not found:
+            return _api_error_response(404, "notice not found")
+        _save_state()
+        return {"success": True, "post": found}, 200
+
+    elif method == "DELETE":
+        del_id = query.get("id")
+        if not del_id:
+            return _api_error_response(400, "id is required")
+        room_data[room_id]["noticePosts"] = [
+            p for p in room_data[room_id]["noticePosts"] if p.get("id") != del_id
+        ]
+        if del_id not in room_data[room_id].get("deletedPostIds", []):
+            room_data[room_id].setdefault("deletedPostIds", []).append(del_id)
+        _save_state()
+        return {"success": True, "id": del_id}, 200
+
+    return _api_error_response(405, "method not allowed")
+
+
+def _api_room_checklist(room_id, method, query, body):
+    """POST/PUT/DELETE /api/rooms/:room/checklist"""
+    _ensure_room_data(room_id)
+
+    if method == "POST":
+        board = json.loads(body) if body else {}
+        room_data[room_id]["checklists"].append(board)
+        _save_state()
+        return {"success": True, "board": board}, 200
+
+    elif method == "PUT":
+        data = json.loads(body) if body else {}
+        board_id = query.get("id") or data.get("id")
+        if not board_id:
+            return _api_error_response(400, "id is required")
+        found = None
+        for board in room_data[room_id]["checklists"]:
+            if board.get("id") == board_id:
+                for key in ("title", "category", "tags", "color"):
+                    if key in data:
+                        board[key] = data[key]
+                found = board
+                break
+        if not found:
+            return _api_error_response(404, "checklist not found")
+        _save_state()
+        return {"success": True, "board": found}, 200
+
+    elif method == "DELETE":
+        del_id = query.get("id")
+        if not del_id:
+            return _api_error_response(400, "id is required")
+        room_data[room_id]["checklists"] = [
+            b for b in room_data[room_id]["checklists"] if b.get("id") != del_id
+        ]
+        if del_id not in room_data[room_id].get("deletedChecklistIds", []):
+            room_data[room_id].setdefault("deletedChecklistIds", []).append(del_id)
+        _save_state()
+        return {"success": True, "id": del_id}, 200
+
+    return _api_error_response(405, "method not allowed")
+
+
+def _api_room_keymgmt(room_id, method, query, body):
+    """POST/PUT/DELETE /api/rooms/:room/keymgmt"""
+    _ensure_room_data(room_id)
+
+    if method == "POST":
+        entry = json.loads(body) if body else {}
+        room_data[room_id].setdefault("keyManagements", []).append(entry)
+        _save_state()
+        return {"success": True, "entry": entry}, 200
+
+    elif method == "PUT":
+        data = json.loads(body) if body else {}
+        entry_id = query.get("id") or data.get("id")
+        if not entry_id:
+            return _api_error_response(400, "id is required")
+        found = None
+        for entry in room_data[room_id].get("keyManagements", []):
+            if entry.get("id") == entry_id:
+                for key in ("label", "streamKey", "streamUrl", "currentProgram"):
+                    if key in data:
+                        entry[key] = data[key]
+                entry["updatedAt"] = data.get("updatedAt", int(time.time() * 1000))
+                found = entry
+                break
+        if not found:
+            return _api_error_response(404, "key management entry not found")
+        _save_state()
+        return {"success": True, "entry": found}, 200
+
+    elif method == "DELETE":
+        del_id = query.get("id")
+        if not del_id:
+            return _api_error_response(400, "id is required")
+        room_data[room_id]["keyManagements"] = [
+            e for e in room_data[room_id].get("keyManagements", []) if e.get("id") != del_id
+        ]
+        if del_id not in room_data[room_id].get("deletedKeyIds", []):
+            room_data[room_id].setdefault("deletedKeyIds", []).append(del_id)
+        _save_state()
+        return {"success": True, "id": del_id}, 200
+
+    return _api_error_response(405, "method not allowed")
+
+
+def _api_room_chats(room_id):
+    """GET /api/rooms/:room/chats"""
+    _ensure_room_data(room_id)
+    return {"messages": room_data[room_id].get("chatMessages", [])}, 200
+
+
 async def _mini_http(reader, writer):
-    """Serve a single HTTP request. Read first line, serve file, close."""
+    """Serve HTTP requests — REST API + static files."""
     try:
         line = await asyncio.wait_for(reader.readline(), timeout=5)
-        if not line or not line.startswith(b"GET "):
+        if not line:
             writer.close(); return
         parts = line.decode(errors="replace").strip().split(" ")
-        path = parts[1] if len(parts) > 1 else "/"
-        # Consume remaining headers
+        if len(parts) < 2:
+            writer.close(); return
+        method = parts[0].upper()
+        raw_path = parts[1]
+
+        path = raw_path
+        query_params = {}
+        if "?" in raw_path:
+            path, qs = raw_path.split("?", 1)
+            for pair in qs.split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    query_params[k] = v
+
+        headers = {}
         while True:
             hdr = await reader.readline()
             if hdr == b"\r\n" or not hdr:
                 break
+            hdr_str = hdr.decode(errors="replace").strip()
+            if ":" in hdr_str:
+                hk, hv = hdr_str.split(":", 1)
+                headers[hk.strip().lower()] = hv.strip()
+
+        body = b""
+        cl = headers.get("content-length", "0")
+        try:
+            content_length = int(cl)
+        except ValueError:
+            content_length = 0
+        if content_length > 0:
+            body = await asyncio.wait_for(reader.readexactly(content_length), timeout=5)
+
+        if method == "OPTIONS":
+            resp = (
+                b"HTTP/1.1 200 OK\r\n"
+                b"Access-Control-Allow-Origin: *\r\n"
+                b"Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+                b"Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
+                b"Content-Length: 0\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            writer.write(resp); await writer.drain()
+            writer.close(); return
+
+        if path.startswith("/api/"):
+            status_code = 200
+            response_data = None
+
+            try:
+                rest_path = path[len("/api/"):]
+
+                if rest_path == "health":
+                    response_data, status_code = _api_health()
+                elif rest_path.startswith("rooms/"):
+                    sub = rest_path[len("rooms/"):]
+                    slash_idx = sub.find("/")
+                    if slash_idx == -1:
+                        room_id = sub
+                        sub_resource = None
+                    else:
+                        room_id = sub[:slash_idx]
+                        sub_resource = sub[slash_idx+1:]
+
+                    if sub_resource is None:
+                        response_data, status_code = {"error": "missing resource"}, 404
+                    elif sub_resource == "state" and method == "GET":
+                        response_data, status_code = _api_room_state(room_id)
+                    elif sub_resource == "notice":
+                        response_data, status_code = _api_room_notice(room_id, method, query_params, body)
+                    elif sub_resource == "checklist":
+                        response_data, status_code = _api_room_checklist(room_id, method, query_params, body)
+                    elif sub_resource == "keymgmt":
+                        response_data, status_code = _api_room_keymgmt(room_id, method, query_params, body)
+                    elif sub_resource == "chats" and method == "GET":
+                        response_data, status_code = _api_room_chats(room_id)
+                    else:
+                        response_data, status_code = {"error": "not found"}, 404
+                else:
+                    response_data, status_code = {"error": "not found"}, 404
+            except json.JSONDecodeError:
+                response_data, status_code = {"error": "invalid JSON"}, 400
+            except Exception as e:
+                _log('REST-API', f'Error: {e}')
+                response_data, status_code = {"error": "internal server error"}, 500
+
+            body_out = json.dumps(response_data).encode()
+            status_msg = {
+                200: b"200 OK", 201: b"201 Created", 400: b"400 Bad Request",
+                404: b"404 Not Found", 405: b"405 Method Not Allowed",
+                500: b"500 Internal Server Error",
+            }.get(status_code, b"500 Internal Server Error")
+            resp = (
+                b"HTTP/1.1 " + status_msg + b"\r\n"
+                b"Access-Control-Allow-Origin: *\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body_out)).encode() + b"\r\n"
+                b"Connection: close\r\n\r\n"
+            ) + body_out
+            writer.write(resp); await writer.drain()
+            writer.close(); return
+
         if path == "/":
             path = "/clipper.html"
         safe_path = os.path.normpath(os.path.join(_SCRIPT_DIR, path.lstrip("/")))
         if not safe_path.startswith(_SCRIPT_DIR) or not os.path.isfile(safe_path):
-            body = b"Not Found"; status = b"404 Not Found"; ct = b"text/plain"
+            body_out = b"Not Found"; status = b"404 Not Found"; ct = b"text/plain"
         else:
             ct_val, _ = mimetypes.guess_type(safe_path)
             ct = (ct_val or "text/html").encode()
             with open(safe_path, "rb") as f:
-                body = f.read()
+                body_out = f.read()
             status = b"200 OK"
         resp = (b"HTTP/1.1 " + status + b"\r\n"
                 b"Content-Type: " + ct + b"\r\n"
-                b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                b"Content-Length: " + str(len(body_out)).encode() + b"\r\n"
                 b"Cache-Control: no-store, no-cache, must-revalidate\r\n"
                 b"Pragma: no-cache\r\n"
                 b"Expires: 0\r\n"
-                b"Connection: close\r\n\r\n") + body
+                b"Access-Control-Allow-Origin: *\r\n"
+                b"Connection: close\r\n\r\n") + body_out
         writer.write(resp); await writer.drain()
     except Exception:
         pass
@@ -1391,12 +1665,6 @@ async def main():
     http_server = await asyncio.start_server(_mini_http, "0.0.0.0", 8766)
 
     async with websockets.serve(handler, "0.0.0.0", 8765):
-        # Auto-open browser to client page
-        try:
-            import webbrowser
-            webbrowser.open('http://localhost:8766')
-        except Exception:
-            pass  # headless environment: silently ignore
         await stop
 
 
