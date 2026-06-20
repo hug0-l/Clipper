@@ -77,6 +77,7 @@
       this._reconnectDelay = 1000;
       this._heartbeatTimer = null;
       this._pending = {};
+      this._peers = new Map();
 
       // 快取資料
       this._state = {
@@ -200,16 +201,24 @@
       // Optimistic local store
       this._state.chatMessages.push(msg);
       this._emit('chat', msg);
+
+      // Broadcast to ALL known peers via relay-data (WS relay mode)
+      const payload = {type: 'chat', from: msg.from, text: msg.text, timestamp: msg.timestamp, msgId: this._uuid()};
+      for (const [peerId] of this._peers) {
+        this._send({
+          type: 'relay-data',
+          room: this._state.room,
+          to: peerId,
+          data: payload,
+        });
+      }
+      // Also send chat-backup for server persistence
       this._send({
-        type: 'relay-data',
+        type: 'chat-backup',
         room: this._state.room,
-        data: {
-          type: 'chat',
-          from: msg.from,
-          text: msg.text,
-          timestamp: msg.timestamp,
-          msgId: this._uuid(),
-        },
+        text: msg.text,
+        from: msg.from,
+        timestamp: msg.timestamp,
       });
       return true;
     }
@@ -493,6 +502,7 @@
         case 'room_peers':
           if (data.peers) {
             this._state.peers = data.peers;
+            this._peers = new Map(data.peers.map(p => [p.peerId, p]));
             data.peers.forEach(p => this._emit('peer-joined', p));
           }
           break;
@@ -503,9 +513,13 @@
             const newIds = new Set(data.peers.map(p => p.peerId));
             // 離開的 peer
             this._state.peers.forEach(p => {
-              if (!newIds.has(p.peerId)) this._emit('peer-left', p.peerId);
+              if (!newIds.has(p.peerId)) {
+                this._peers.delete(p.peerId);
+                this._emit('peer-left', p.peerId);
+              }
             });
             this._state.peers = data.peers;
+            this._peers = new Map(data.peers.map(p => [p.peerId, p]));
             // 新加入的 peer
             data.peers.forEach(p => {
               if (!oldIds.has(p.peerId)) this._emit('peer-joined', p);
@@ -514,10 +528,19 @@
           break;
 
         case 'peer_joined':
-          this._emit('peer-joined', { peerId: data.peerId, displayName: data.displayName });
+          {
+            const peer = { peerId: data.peerId, displayName: data.displayName };
+            this._peers.set(data.peerId, peer);
+            if (!this._state.peers.find(p => p.peerId === data.peerId)) {
+              this._state.peers.push(peer);
+            }
+            this._emit('peer-joined', peer);
+          }
           break;
 
         case 'peer_left':
+          this._peers.delete(data.peerId);
+          this._state.peers = this._state.peers.filter(p => p.peerId !== data.peerId);
           this._emit('peer-left', data.peerId);
           break;
 
