@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### 🚀 新增功能
+
+- **🛡️ 離線唯讀模式** — 伺服器中斷時自動鎖定所有協作功能，防止離線操作導致重連後的資料衝突（R-1 / R-2）
+  - `APP.state.readOnly` + `setReadOnly(enabled)` 全域開關
+  - WS 斷線自動觸發唯讀、重連成功自動解除
+  - 手動中斷不觸發唯讀模式
+  - 標題橫幅滑入動畫 + 按鈕灰色半透明 + 檔案區遮罩（R-4）
+- **🔒 22 個協作函式唯讀攔截** — 聊天、檔案傳輸、公告欄、檢查清單、密鑰管理所有資料修改操作在唯讀時阻擋並提示（R-3）
+- **🧟 幽靈復活防護** — 伺服器記錄已刪除的 IDs，重連時 room-state 合併自動過濾，防止已刪除的資料透過 localStorage 復活（R-5）
+- **🌐 自動跳轉瀏覽器** — 啟動 `signal_server.py` 後自動開啟 `http://localhost:8766` 客戶端頁面（R-6）
+
 ### 🐛 修復
 
 - **管理面板無法取得伺服器日誌** — `_refreshLogViewer()` 現在會向伺服器請求日誌，切換管理頁籤時自動刷新
@@ -34,14 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **線上用戶列表改善** — 顯示 peerId 在名稱旁方便辨識；`isSelf` 判斷改為純 peerId 比對
 - **程式碼審查修復** — 修復 5 個潛在 bug（dead code、重複 WS 連線、`setChecklistReminder` 未定義變數、重複 debug dump 監聽器、case 格式錯誤）
 - **iPhone 無法收發訊息** — 放寬 `sendChatMessage` 和 `relayToPeer` 的連線門禁，從 `APP.state.connected`（需 DC 開啟）改為 WS 連線檢查，iPhone（不支援 WebRTC）現在可透過 relay 正常收發
-
-### 🚀 新增功能
-
-- **📡 密鑰管理分頁** — 專用管理直播推流 Stream Key 和 URL，支援標記「正在直播的節目名稱」、使用中/未使用狀態切換、部分遮蔽顯示、一鍵複製
-- **🆔 頁首 Peer ID 顯示** — header 時鐘旁顯示當前用戶 Peer ID，連線後自動更新、斷線後清除
-
-### 🔧 改善
-
 - **P2P + Relay 混合模式** — WebRTC DataChannel 優先（桌面瀏覽器 P2P 直連），失敗自動降級 WS Relay（iPhone 相容），傳輸模式設定頁即時顯示各用戶 P2P/Relay 狀態
 - **用戶標籤格式統一** — 所有介面中的用戶名稱統一為 `顯示名稱 (PeerID)` 格式（成員離開通知、傳輸模式設定頁、線上用戶列表、檔案接收彈窗）
 - **檔案傳輸取消按鈕修復** — relay 模式下取消操作正確匹配 fileId，清除殘留的 fileSending 條目
@@ -49,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **檔案傳輸佇列修復** — 現在可依序傳送所有佇列中的檔案，不再只有第一檔能傳
 - **檔案傳輸對象選擇** — 取消「全部」預設高亮和單一對象自動選取，用戶必須手動點選
 - **HTTP 回應加上 no-cache header** — 防止瀏覽器快取舊版 clipper.html 導致介面不更新
+
+### 🚀 新增功能
+
+- **📡 密鑰管理分頁** — 專用管理直播推流 Stream Key 和 URL，支援標記「正在直播的節目名稱」、使用中/未使用狀態切換、部分遮蔽顯示、一鍵複製
+- **🆔 頁首 Peer ID 顯示** — header 時鐘旁顯示當前用戶 Peer ID，連線後自動更新、斷線後清除
 
 ## [1.1.0] — 2026-06-19
 

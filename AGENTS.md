@@ -54,3 +54,6 @@ logs/                 # Daily log files (auto-rotated, 24h retention)
 - `_log._file` is assigned in `_setup_logging()`; the old JSON persistence file (`vcc_server_state.json`) gets renamed to `.bak` after migration.
 - HTTP server: `_mini_http()` runs on port 8766 via `asyncio.start_server`. Independent from WebSocket server on 8765.
 - NTP validation: `_ntp_query()` returns `(offset, is_valid)`. When `is_valid=False` the admin panel shows the offset in red with a tooltip. All NTP responses (`time-sync`, `ntp-config-result`, `admin-login`, `admin-config`) include `ntpValid`.
+- **離線唯讀模式**: WS 斷線時自動呼叫 `setReadOnly(true)` 鎖定所有協作功能；重連成功後（`joined` 事件）自動解除。`setReadOnly()` 實作在獨立的 `Read-Only Mode` 區塊中。手動中斷（`disconnect()`）不觸發唯讀。
+- **幽靈復活防護**: 伺服器記錄 `deletedPostIds`/`deletedChecklistIds`/`deletedKeyIds`，`room-state` 回應中攜帶這些 ID。前端合併時先過濾已被伺服器刪除的項目，再執行現有合併邏輯。向後相容：舊伺服器不發 `deleted*Ids` 則跳過過濾。
+- **自動跳轉瀏覽器**: `signal_server.py` 啟動完成後自動呼叫 `webbrowser.open('http://localhost:8766')`，headless 環境優雅降級。
