@@ -205,15 +205,21 @@
       this._state.chatMessages.push(msg);
       this._emit('chat', msg);
 
-      // Broadcast to ALL known peers via relay-data (WS relay mode)
-      const payload = {type: 'chat', from: msg.from, text: msg.text, timestamp: msg.timestamp, msgId: this._uuid()};
-      for (const [peerId] of this._peers) {
-        this._send({
-          type: 'relay-data',
-          room: this._state.room,
-          to: peerId,
-          data: payload,
-        });
+      // Broadcast to ALL known peers via relay-data (WS relay mode) — only if no P2P DC available
+      var needRelay = false;
+      for (const [pid] of this._peers) {
+        // skip self
+        if (pid === this._peerId) continue;
+        needRelay = true;
+      }
+      if (needRelay) {
+        const payload = {type: 'chat', from: msg.from, text: msg.text, timestamp: msg.timestamp, msgId: this._uuid()};
+        for (const [pid] of this._peers) {
+          if (pid === this._peerId) continue;
+          this._send({
+            type: 'relay-data', room: this._state.room, to: pid, data: payload,
+          });
+        }
       }
       // Also send chat-backup for server persistence
       this._send({
@@ -700,9 +706,15 @@
           break;
 
         case 'peer_left':
-          this._peers.delete(data.peerId);
-          this._state.peers = this._state.peers.filter(p => p.peerId !== data.peerId);
-          this._emit('peer-left', data.peerId);
+          {
+            const leftPeer = { peerId: data.peerId, displayName: data.displayName || '' };
+            // Try to get display name from _peers before deleting
+            const existing = this._peers.get(data.peerId);
+            if (existing && existing.displayName) leftPeer.displayName = existing.displayName;
+            this._peers.delete(data.peerId);
+            this._state.peers = this._state.peers.filter(p => p.peerId !== data.peerId);
+            this._emit('peer-left', leftPeer);
+          }
           break;
 
         // ---- 公告廣播 ----

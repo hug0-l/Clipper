@@ -2478,7 +2478,7 @@ function handleWsMessage(data) {
             APP.state.room = data.room;
             APP.state.myPeerId = data.peerId;
             APP.setRoomCode(data.room);
-            APP.showStatusMsg(`已加入配對 (我的 ID: ${data.peerId})`);
+            APP.showStatusMsg(`✅ 已加入配對`);
             // Show peerId in header
             const peerIdSpan = document.getElementById('peerIdSpan');
             const peerIdBadge = document.getElementById('peerIdBadge');
@@ -2817,12 +2817,15 @@ function handleWsMessage(data) {
             break;
 
         case 'peer_joined':
-            APP.showStatusMsg(`新成員加入 (${data.peerId})`);
+            {
+                const joinName = APP.state.peerNames.get(data.peerId) || data.peerId;
+                APP.showStatusMsg(`👤 新成員加入: ${joinName}`);
+            }
             connectToPeer(data.peerId);
             break;
 
         case 'offer':
-            APP.showStatusMsg('收到連線請求');
+            APP.showStatusMsg('📡 收到連線請求');
             startWebRTCPeer(data.from, false, data.data);
             break;
 
@@ -2847,7 +2850,10 @@ function handleWsMessage(data) {
             break;
 
         case 'peer_left':
-            APP.showStatusMsg(`成員離開 (${data.peerId})`);
+            {
+                const leaveName = APP.state.peerNames.get(data.peerId) || data.peerId;
+                APP.showStatusMsg(`👋 成員離開: ${leaveName}`);
+            }
             removePeer(data.peerId);
             break;
 
@@ -2975,7 +2981,7 @@ function connectToPeer(targetPeerId) {
 function removePeer(peerId) {
     const peerState = APP.state.peers.get(peerId);
     if (!peerState) return;
-    const displayName = (APP.state.peerNames.get(peerId) || peerId) + ' (' + peerId + ')';
+    const displayName = APP.state.peerNames.get(peerId) || peerId;
     if (peerState.dc) {
         try { peerState.dc.close(); } catch (_) {}
     }
@@ -3148,7 +3154,7 @@ function setupDataChannel(dc, peerId) {
         console.log(`[DC:${peerId}] Open`);
         // Clear any lingering error toast
         document.getElementById('errorToast').className = '';
-        APP.showStatusMsg(`DataChannel 已開啟 (${peerId})`);
+        APP.showStatusMsg(`🔗 資料通道已開啟 (${APP.state.peerNames.get(peerId) || peerId})`);
         // Store the DC
         const peerState = APP.state.peers.get(peerId);
         if (peerState) {
@@ -3173,7 +3179,8 @@ function setupDataChannel(dc, peerId) {
 
     dc.onerror = (err) => {
         console.error(`[DC:${peerId}] Error`, err);
-        APP.showError(`DataChannel 錯誤 (${peerId}) — 請嘗試重新連線`, true);
+        const errName = APP.state.peerNames.get(peerId) || peerId;
+        APP.showError(`🔗 資料通道錯誤 (${errName}) — 請嘗試重新連線`, true);
         markAllFailed();
     };
 
@@ -4431,7 +4438,7 @@ function updatePeerTargetUI() {
         const selected = APP.state.selectedTargetPeerIds.has(pid);
         btn.className = 'peer-target-btn' + (selected ? ' selected' : '');
         const dName = APP.state.peerNames.get(pid) || pid;
-        btn.textContent = `🖥 ${dName} (${pid})`;
+        btn.textContent = `🖥 ${dName}`;
         btn.title = pid;
         btn.dataset.peerId = pid;
         btn.addEventListener('click', () => {
@@ -4566,7 +4573,7 @@ function handleFileMeta(msg, fromPeerId) {
     APP.state.peerCurrentFile.set(fromPeerId, msg.fileId);
     // Show popup notification + update UI
     const displayName = APP.state.peerNames.get(fromPeerId) || fromPeerId;
-    showPopup('📁', '接收檔案中', displayName + ' (' + fromPeerId + ') 正在傳送：' + msg.name);
+    showPopup('📁', '接收檔案中', displayName + ' 傳送：' + msg.name);
     updateFileUI();
 }
 
