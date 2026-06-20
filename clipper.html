@@ -2296,7 +2296,11 @@ function handleWsMessage(data) {
                     APP.state.timeSource = 'local';
                 }
                 // Update admin NTP offset display if visible
-                updateSettingsView();
+                if (typeof updateSettingsView === 'function') {
+                    updateSettingsView();
+                } else if (window.adminModule && typeof adminModule._updateSettingsView === 'function') {
+                    adminModule._updateSettingsView();
+                }
             }
             break;
 
