@@ -226,3 +226,8 @@ logs/
 .refact/
 .ai/
 .idea/
+-e 
+# SSL certs (local dev)
+*.pem
+*.crt
+*.key
