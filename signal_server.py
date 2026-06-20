@@ -802,6 +802,7 @@ async def handler(websocket):
                     continue
                 _ensure_room_data(rid)
                 backup_msg = {
+                    "msgId": data.get("msgId", ""),
                     "text": data.get("text", ""),
                     "from": data.get("from", ""),
                     "timestamp": data.get("timestamp", time.time() * 1000),
@@ -817,6 +818,56 @@ async def handler(websocket):
                 ]
                 _save_state()
                 _log('CHAT-BACKUP', f'{my_peer_id} backed up chat msg in {rid} ({len(room_data[rid]["chatMessages"])} stored)')
+
+            elif msg_type == "chat-edit":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                target_msg_id = data.get("msgId")
+                new_text = data.get("text", "")
+                found = False
+                for msg in room_data[rid].get("chatMessages", []):
+                    if msg.get("msgId") == target_msg_id:
+                        msg["text"] = new_text
+                        msg["edited"] = True
+                        found = True
+                        break
+                if not found:
+                    await websocket.send(json.dumps({"type": "error", "message": "message not found"}))
+                    continue
+                _broadcast(
+                    rooms[rid],
+                    {"type": "chat-edit", "msgId": target_msg_id, "newText": new_text, "edited": True},
+                    exclude=websocket,
+                )
+                _save_state()
+                _log('CHAT-EDIT', f'{my_peer_id} edited msg {target_msg_id} in {rid}')
+
+            elif msg_type == "chat-delete":
+                rid = data.get("room")
+                if not rid or rid not in rooms:
+                    await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+                    continue
+                _ensure_room_data(rid)
+                target_msg_id = data.get("msgId")
+                found = False
+                for msg in room_data[rid].get("chatMessages", []):
+                    if msg.get("msgId") == target_msg_id:
+                        msg["deleted"] = True
+                        found = True
+                        break
+                if not found:
+                    await websocket.send(json.dumps({"type": "error", "message": "message not found"}))
+                    continue
+                _broadcast(
+                    rooms[rid],
+                    {"type": "chat-delete", "msgId": target_msg_id, "deleted": True},
+                    exclude=websocket,
+                )
+                _save_state()
+                _log('CHAT-DELETE', f'{my_peer_id} deleted msg {target_msg_id} in {rid}')
 
             elif msg_type == "notice-create":
                 rid = data.get("room")
@@ -1138,13 +1189,13 @@ async def handler(websocket):
                     cutoff = (time.time() - retention * 86400) * 1000
                     filtered = [
                         m for m in room_data[rid].get("chatMessages", [])
-                        if _ts_val(m["timestamp"]) > cutoff
+                        if _ts_val(m["timestamp"]) > cutoff and not m.get("deleted", False)
                     ]
                 else:
                     since_f = _ts_val(since) if since is not None else 0
                     filtered = [
                         m for m in room_data[rid].get("chatMessages", [])
-                        if _ts_val(m["timestamp"]) > since_f
+                        if _ts_val(m["timestamp"]) > since_f and not m.get("deleted", False)
                     ]
                 await websocket.send(json.dumps({
                     "type": "chat-history-result",
