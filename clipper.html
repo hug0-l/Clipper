@@ -160,8 +160,11 @@ main {
     flex-direction: column;
     min-height: 0;
     flex: 1;
-    overflow-y: auto;
     animation: fadeIn 0.2s ease;
+}
+/* Non-chat tabs scroll naturally; chat tab has its own inner scroll */
+.tab-pane.active:not([data-tab="clipboard"]) {
+    overflow-y: auto;
 }
 @keyframes fadeIn {
     from { opacity: 0.3; }
