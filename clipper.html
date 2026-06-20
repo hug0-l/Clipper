@@ -542,7 +542,33 @@ footer input[type="text"] {
 #errorToast .toast-btn:hover {
     background: rgba(252, 165, 165, 0.1);
 }
-@keyframes slideDown {
+@keyframes slideDown {    from { transform: translateY(-100%); }
+    to { transform: translateY(0); }
+}
+
+/* --- Read-Only Banner --- */
+#readOnlyBanner {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 9998;
+    padding: 10px 20px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 500;
+    background: #78350f;
+    color: #fcd34d;
+    border-bottom: 1px solid #92400e;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+#readOnlyBanner.visible {
+    display: block;
+    opacity: 1;
+}
+
     from { transform: translateY(-100%); }
     to { transform: translateY(0); }
 }
@@ -1010,6 +1036,8 @@ footer input[type="text"] {
 <main>
     <div class="main-content">
     <div id="errorToast" class=""></div>
+    <div id="readOnlyBanner"></div>
+
     <div id="popupContainer"></div>
     <section class="tab-pane active" data-tab="clipboard">
         <div class="chat-container" id="chatContainer">
@@ -1440,7 +1468,9 @@ const APP = {
         ntpEnabled: false,
         ntpServer: 'stdtime.gov.hk',
         stunServer: 'stun:stun.l.google.com:19302',        stunServer: 'stun:stun.l.google.com:19302',
-        ntpValid: false,    },
+        ntpValid: false,
+        readOnly: false,     // 初始 false
+    },
     updateStatus(status) {
         const badge = document.getElementById('statusBadge');
         badge.classList.remove('connected', 'connecting', 'disconnected');
@@ -1597,6 +1627,44 @@ function _downloadClientLogs() {
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+// ========== Read-Only Mode ==========
+function setReadOnly(enabled) {
+    APP.state.readOnly = enabled;
+    const banner = document.getElementById('readOnlyBanner');
+    if (!banner) return;
+    if (enabled) {
+        // 1. Show banner
+        banner.textContent = '🛑 信令伺服器中斷 — 唯讀模式';
+        banner.className = 'visible';
+        // 2. Disable all buttons
+        document.querySelectorAll('button').forEach(el => { el.disabled = true; });
+        // 3. Disable all inputs, textareas, selects
+        document.querySelectorAll('input, textarea, select').forEach(el => { el.disabled = true; });
+        // 4. Disable file drop zone
+        const dropZone = document.getElementById('fileDropZone');
+        if (dropZone) {
+            dropZone.style.pointerEvents = 'none';
+            dropZone.style.opacity = '0.4';
+        }
+        // 5. Close all open modal overlays
+        document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+    } else {
+        // 1. Remove banner
+        banner.className = '';
+        banner.textContent = '';
+        // 2. Re-enable all buttons
+        document.querySelectorAll('button').forEach(el => { el.disabled = false; });
+        // 3. Re-enable all inputs, textareas, selects
+        document.querySelectorAll('input, textarea, select').forEach(el => { el.disabled = false; });
+        // 4. Restore file drop zone
+        const dropZone = document.getElementById('fileDropZone');
+        if (dropZone) {
+            dropZone.style.pointerEvents = '';
+            dropZone.style.opacity = '';
+        }
+    }
 }
 
 // ========== LocalStorage Persistence ==========
