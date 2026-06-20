@@ -2065,8 +2065,6 @@ APP.registerSyncConsumer = function(fn) {
     APP.state.syncConsumers.push(fn);
 };
 // ========== Display Name ==========
-}
-// ========== Display Name ==========
 const ADJS = ['快樂','活潑','聰明','安靜','勇敢','溫柔','可愛','陽光','調皮','大方','瀟灑','優雅','熱情','冷靜','開朗'];
 const NOUNS = ['熊貓','海豚','老鷹','貓咪','狐狸','兔子','狼','老虎','獅子','企鵝','天鵝','蝴蝶','鸚鵡','鯨魚','樹懶'];
 function generateName() {
@@ -3444,42 +3442,6 @@ function updatePeerTargetUI() {
 }
 
 
-    const blob = new Blob(entry.blobs, {type: 'application/octet-stream'});
-    const url = URL.createObjectURL(blob);
-
-    // Verify SHA-256 checksum if sender provided one and crypto.subtle available
-    if (entry.sha256 && crypto.subtle) {
-        const reader = new FileReader();
-        reader.onload = async function() {
-            const buf = reader.result;
-            const hashBuffer = await crypto.subtle.digest('SHA-256', buf);
-            const receivedHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-            if (receivedHash === entry.sha256) {
-                APP.showStatusMsg(`✅ ${entry.name} — 完整性驗證通過 (SHA-256)`);
-            } else {
-                APP.showStatusMsg(`⚠️ ${entry.name} — 完整性驗證失敗，檔案可能已損壞`);
-            }
-        };
-        reader.readAsArrayBuffer(blob);
-    } else {
-        APP.showStatusMsg(`已接收: ${entry.name}`);
-    }
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = entry.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-
-    APP.state.fileReceives.delete(msg.fileId);
-    // Clear peerCurrentFile if this was the current file from this peer
-    if (APP.state.peerCurrentFile.get(fromPeerId) === msg.fileId) {
-        APP.state.peerCurrentFile.delete(fromPeerId);
-    }
-}
-
 // ========== File Transfer UI Wire-up ==========
 
 (function() {
@@ -3538,7 +3500,6 @@ function appendSystemMessage(text) {
         }
     }
 }
-});
 document.getElementById('btnClearChat').addEventListener('click', async () => {
     const confirmed = await showConfirmDialog('確定要清除本機聊天紀錄嗎？此操作僅影響本機，不會影響其他客戶端。');
     if (!confirmed) return;
