@@ -19,30 +19,41 @@ from datetime import datetime, timezone, timedelta
 import websockets
 import mimetypes
 
-from services.ws_router import ROUTES, _ts_val
+from services.ws_router import ROUTES
+from services.persistence import Persistence
+from services.chat_service import ChatService
+from services.room_service import RoomServicefrom services.keymgmt_service import KeyMgmtService
 
-
-# room_id -> {peerId: {"ws": websocket, "joinedAt": "ISO timestamp"}}
-rooms = {}
-peer_ids = set()  # all assigned peerIds across all rooms
-
+# ──── Config ────────────────────────────────────────────────────────────
 MAX_PEERS_PER_ROOM = 50
-# room_id -> {"noticePosts": [...], "checklists": [...], "chatMessages": [...]}
-room_data = {}
-
-CHAT_RETENTION_DAYS = 7    # How long to keep chat backups (adjustable)
+CHAT_RETENTION_DAYS = 7
 DB_PATH = "clipper_data.db"
 LOG_DIR = "logs"
 LOG_RETENTION_HOURS = 24
 DEFAULT_ADMIN_PASSWORD = "12345"
-DEBUG = True   # Toggle verbose debug output
-_config = {"chatRetentionDays": CHAT_RETENTION_DAYS, "stunServer": "stun:stun.l.google.com:19302"}  # mutable config for runtime changes
-_ntp_config = {"server": "stdtime.gov.hk", "offset": 0.0, "enabled": True}
-_sessions = {}  # token -> {"createdAt": timestamp}
-_login_attempts = {}  # websocket_id -> {"count": int, "first": timestamp}
+DEBUG = True
+SESSION_TIMEOUT = 1800
 MAX_LOGIN_ATTEMPTS = 5
-LOGIN_COOLDOWN = 30  # seconds
-SESSION_TIMEOUT = 1800  # 30 minutes
+LOGIN_COOLDOWN = 30
+
+_config = {"chatRetentionDays": CHAT_RETENTION_DAYS, "stunServer": "stun:stun.l.google.com:19302"}
+_ntp_config = {"server": "stdtime.gov.hk", "offset": 0.0, "enabled": True}
+_sessions = {}
+_login_attempts = {}
+
+# Global persistence instance
+persistence = Persistence(DB_PATH)
+
+# Global chat service instance
+chat_service = ChatService(persistence, CHAT_RETENTION_DAYS)
+# Global room service instance
+room_service = RoomService(persistence, rooms, peer_ids, MAX_PEERS_PER_ROOM)
+
+# room_id -> {peerId: {"ws": websocket, "joinedAt": "ISO timestamp"}}
+rooms = {}
+peer_ids = set()
+# room_id -> {"noticePosts": [...], "checklists": [...], "chatMessages": [...]}
+room_data = {}
 
 
 def _setup_logging():
@@ -76,40 +87,6 @@ def _log(category, message):
 
 
 _log._file = None
-
-def _hash_password(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
-
-def _init_admin_password():
-    """Insert default admin password if not set."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        conn.execute("CREATE TABLE IF NOT EXISTS admin (key TEXT PRIMARY KEY, value TEXT)")
-        conn.execute("INSERT OR IGNORE INTO admin VALUES ('password', ?)", (_hash_password(DEFAULT_ADMIN_PASSWORD),))
-        conn.commit()
-    finally:
-        conn.close()
-
-def _verify_admin_password(pw):
-    """Constant-time password comparison to prevent timing attacks."""
-    import hmac
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        row = conn.execute("SELECT value FROM admin WHERE key='password'").fetchone()
-        if not row:
-            return False
-        return hmac.compare_digest(_hash_password(pw), row[0])
-    finally:
-        conn.close()
-
-def _set_admin_password(new_pw):
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        conn.execute("INSERT OR REPLACE INTO admin VALUES ('password', ?)", (_hash_password(new_pw),))
-        conn.commit()
-        return True
-    finally:
-        conn.close()
 
 def _generate_session():
     """Generate a secure random session token."""
@@ -172,22 +149,44 @@ def _init_db():
 
 
 def _load_state():
-    """Load all rooms from SQLite into memory."""
+    """Load all rooms from persistence layer, with legacy SQLite fallback."""
     global room_data
     room_data = {}
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        rows = conn.execute("SELECT room_id, notice_posts, checklists, chat_messages, key_managements FROM rooms").fetchall()
-        for rid, np, cl, cm, km in rows:
-            room_data[rid] = {
-                "noticePosts": json.loads(np),
-                "checklists": json.loads(cl),
-                "chatMessages": json.loads(cm),
-                "keyManagements": json.loads(km),
-            }
-    except sqlite3.OperationalError:
-        pass  # table doesn't exist yet
-    conn.close()
+
+    # Try new persistence layer first
+    loaded = persistence.load_all_rooms()
+    if loaded:
+        room_data = loaded
+    else:
+        # Legacy: read from old rooms table
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            rows = conn.execute(
+                "SELECT room_id, notice_posts, checklists, chat_messages, key_managements FROM rooms"
+            ).fetchall()
+            for rid, np, cl, cm, km in rows:
+                room_data[rid] = {
+                    "noticePosts": json.loads(np),
+                    "checklists": json.loads(cl),
+                    "chatMessages": json.loads(cm),
+                    "keyManagements": json.loads(km),
+                }
+            # Migrate to new format
+            for rid in list(room_data.keys()):
+                persistence.save_room_data(rid, room_data[rid])
+        except sqlite3.OperationalError:
+            pass
+        conn.close()
+
+    # Ensure all rooms have deleted arrays
+    for rid in room_data:
+        if "deletedPostIds" not in room_data[rid]:
+            room_data[rid]["deletedPostIds"] = []
+        if "deletedChecklistIds" not in room_data[rid]:
+            room_data[rid]["deletedChecklistIds"] = []
+        if "deletedKeyIds" not in room_data[rid]:
+            room_data[rid]["deletedKeyIds"] = []
+
     # Migrate old JSON if exists
     OLD_JSON = "vcc_server_state.json"
     if os.path.exists(OLD_JSON):
@@ -205,21 +204,9 @@ def _load_state():
 
 
 def _save_state():
-    """Write all rooms to SQLite atomically."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        with conn:
-            for rid, data in room_data.items():
-                conn.execute(
-                    "INSERT OR REPLACE INTO rooms VALUES (?,?,?,?,?)",
-                    (rid,
-                     json.dumps(data.get("noticePosts", [])),
-                     json.dumps(data.get("checklists", [])),
-                     json.dumps(data.get("chatMessages", [])),
-                     json.dumps(data.get("keyManagements", [])))
-                )
-    finally:
-        conn.close()
+    """Write all room data to persistence layer."""
+    for rid, data in room_data.items():
+        persistence.save_room_data(rid, data)
 
 
 def _migrate_room_data():
@@ -242,10 +229,6 @@ def _migrate_room_data():
             room_data[rid]["checklists"] = []
         if "keyManagements" not in room_data[rid]:
             room_data[rid]["keyManagements"] = []
-
-
-NTP_PORT = 123
-NTP_PACKET = b'\x1b' + 47 * b'\x00'  # NTP v4, client mode
 
 def _ntp_query(server=None):
     """Query NTP server and return (offset, is_valid). is_valid=False on failure."""
@@ -567,7 +550,7 @@ async def _mini_http(reader, writer):
                     try:
                         login_data = json.loads(body) if body else {}
                         pw = login_data.get("password", "")
-                        if _verify_admin_password(pw):
+                        if persistence.verify_admin_password(pw):
                             token = _generate_session()
                             response_data, status_code = {"token": token, "success": True}, 200
                         else:
@@ -704,10 +687,12 @@ async def handler(websocket):
         "ensure_room_data": _ensure_room_data,
         "save_state": _save_state,
         "verify_session": _verify_session,
-        "generate_peer_id": _generate_peer_id,
+        "generate_peer_id": _generate_peer_id,"room_service": room_service,"room_service": room_service,
         "generate_session": _generate_session,
-        "verify_admin_password": _verify_admin_password,
-        "set_admin_password": _set_admin_password,
+        "persistence": persistence,"persistence": persistence,
+        "chat_service": chat_service,
+        "verify_admin_password": persistence.verify_admin_password,
+        "set_admin_password": persistence.set_admin_password,
         "check_login_rate": _check_login_rate,
         "get_logs": _get_logs,
         "ntp_query": _ntp_query,
@@ -753,9 +738,17 @@ async def handler(websocket):
                 _debug(f"Room {room_id} now empty, deleting")
                 del rooms[room_id]
 
-        if room_id and room_id in rooms and len(rooms[room_id]) > 0:
-            asyncio.create_task(_broadcast_peer_list(room_id))
-        _log('DISCONNECT', f'{my_peer_id} disconnected (room: {room_id})')
+        if room_id and room_id in rooms and len(rooms[room_id]) > 0:    finally:
+        was_removed, room_now_empty = room_service.remove_peer(room_id, my_peer_id)
+        if was_removed and not room_now_empty:
+            remaining = len(rooms[room_id])
+            _debug(f"peer_left broadcast: {my_peer_id} left, {remaining} remaining in {room_id}")
+            _broadcast(
+                rooms[room_id],
+                {"type": "peer_left", "peerId": my_peer_id},
+            )
+
+        if room_id and room_id in rooms and len(rooms[room_id]) > 0:        _log('DISCONNECT', f'{my_peer_id} disconnected (room: {room_id})')
 
 
 def _broadcast(room_peers, message, exclude=None):
@@ -887,7 +880,7 @@ async def main():
         pass  # column already exists
     finally:
         _migrate_conn.close()
-    _init_admin_password()
+    persistence.init_admin_password()
     _load_state()
     _migrate_room_data()
     asyncio.create_task(_heartbeat_check())
