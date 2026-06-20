@@ -278,6 +278,12 @@ def _ntp_query(server=None):
 def _ensure_room_data(rid):
     if rid not in room_data:
         room_data[rid] = {"noticePosts": [], "checklists": [], "chatMessages": [], "keyManagements": []}
+    if "deletedPostIds" not in room_data[rid]:
+        room_data[rid]["deletedPostIds"] = []
+    if "deletedChecklistIds" not in room_data[rid]:
+        room_data[rid]["deletedChecklistIds"] = []
+    if "deletedKeyIds" not in room_data[rid]:
+        room_data[rid]["deletedKeyIds"] = []
 
 
 def _generate_peer_id():
@@ -550,6 +556,8 @@ async def handler(websocket):
                 room_data[rid]["noticePosts"] = [
                     p for p in room_data[rid]["noticePosts"] if p.get("id") != del_id
                 ]
+                if del_id and del_id not in room_data[rid]["deletedPostIds"]:
+                    room_data[rid]["deletedPostIds"].append(del_id)
                 _broadcast(
                     rooms[rid],
                     {"type": "notice-delete", "id": del_id},
@@ -630,6 +638,8 @@ async def handler(websocket):
                 room_data[rid]["checklists"] = [
                     b for b in room_data[rid]["checklists"] if b.get("id") != del_id
                 ]
+                if del_id and del_id not in room_data[rid]["deletedChecklistIds"]:
+                    room_data[rid]["deletedChecklistIds"].append(del_id)
                 _broadcast(
                     rooms[rid],
                     {"type": "checklistboard-delete", "id": del_id},
@@ -780,6 +790,9 @@ async def handler(websocket):
                     "noticePosts": room_data[rid].get("noticePosts", []),
                     "checklists": room_data[rid].get("checklists", []),
                     "keyManagements": room_data[rid].get("keyManagements", []),
+                    "deletedNoticeIds": room_data[rid].get("deletedPostIds", []),
+                    "deletedChecklistIds": room_data[rid].get("deletedChecklistIds", []),
+                    "deletedKeyIds": room_data[rid].get("deletedKeyIds", []),
                 }))
                 _log('STATE', f'{my_peer_id} requested state in {rid}')
                 _debug(f"→ TX room-state: {posts_count} posts, {boards_count} boards to {my_peer_id}")
@@ -1173,6 +1186,8 @@ async def handler(websocket):
                 room_data[rid]["keyManagements"] = [
                     e for e in room_data[rid].get("keyManagements", []) if e.get("id") != del_id
                 ]
+                if del_id and del_id not in room_data[rid]["deletedKeyIds"]:
+                    room_data[rid]["deletedKeyIds"].append(del_id)
                 _broadcast(
                     rooms[rid],
                     {"type": "keymgmt-delete", "id": del_id},
@@ -1376,6 +1391,12 @@ async def main():
     http_server = await asyncio.start_server(_mini_http, "0.0.0.0", 8766)
 
     async with websockets.serve(handler, "0.0.0.0", 8765):
+        # Auto-open browser to client page
+        try:
+            import webbrowser
+            webbrowser.open('http://localhost:8766')
+        except Exception:
+            pass  # headless environment: silently ignore
         await stop
 
 

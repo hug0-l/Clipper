@@ -546,31 +546,73 @@ footer input[type="text"] {
     to { transform: translateY(0); }
 }
 
-/* --- Read-Only Banner --- */
-#readOnlyBanner {
-    display: none;
+/* --- Read-Only Mode Styles --- */
+.read-only-banner {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
-    z-index: 9998;
-    padding: 10px 20px;
+    z-index: 9999;
+    background: #7f1d1d;
+    color: #fca5a5;
     text-align: center;
-    font-size: 18px;
+    padding: 8px 16px;
+    font-size: 15px;
     font-weight: 500;
-    background: #78350f;
-    color: #fcd34d;
-    border-bottom: 1px solid #92400e;
-    opacity: 0;
-    transition: opacity 0.25s ease;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    transform: translateY(-100%);
+    transition: transform 0.3s ease;
 }
-#readOnlyBanner.visible {
-    display: block;
+.read-only-banner.active {
+    transform: translateY(0);
+}
+.read-only-banner .banner-close {
+    float: right;
+    cursor: pointer;
+    opacity: 0.7;
+}
+.read-only-banner .banner-close:hover {
     opacity: 1;
 }
 
-    from { transform: translateY(-100%); }
-    to { transform: translateY(0); }
+/* 唯讀模式下禁用 UI */
+.read-only-active .btn[data-write]:not([disabled]),
+.read-only-active button[data-write]:not([disabled]) {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+.read-only-active input[data-write]:not([disabled]),
+.read-only-active textarea[data-write]:not([disabled]) {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* 檔案拖放區唯讀覆蓋層 */
+.file-drop-zone.read-only {
+    position: relative;
+}
+.file-drop-zone.read-only::after {
+    content: '🔒 唯讀模式，檔案傳輸暫停';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(9, 13, 22, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #fca5a5;
+    border-radius: 12px;
+    z-index: 10;
+}
+
+/* header 橫幅推移 */
+.read-only-active header {
+    margin-top: 36px;
+    transition: margin-top 0.3s ease;
 }
 
 /* --- Popup Notification --- */
@@ -1036,7 +1078,7 @@ footer input[type="text"] {
 <main>
     <div class="main-content">
     <div id="errorToast" class=""></div>
-    <div id="readOnlyBanner"></div>
+    <!-- readOnlyBanner created dynamically by setReadOnly() -->
 
     <div id="popupContainer"></div>
     <section class="tab-pane active" data-tab="clipboard">
@@ -1632,38 +1674,46 @@ function _downloadClientLogs() {
 // ========== Read-Only Mode ==========
 function setReadOnly(enabled) {
     APP.state.readOnly = enabled;
-    const banner = document.getElementById('readOnlyBanner');
-    if (!banner) return;
     if (enabled) {
-        // 1. Show banner
-        banner.textContent = '🛑 信令伺服器中斷 — 唯讀模式';
-        banner.className = 'visible';
-        // 2. Disable all buttons
-        document.querySelectorAll('button').forEach(el => { el.disabled = true; });
-        // 3. Disable all inputs, textareas, selects
-        document.querySelectorAll('input, textarea, select').forEach(el => { el.disabled = true; });
-        // 4. Disable file drop zone
-        const dropZone = document.getElementById('fileDropZone');
-        if (dropZone) {
-            dropZone.style.pointerEvents = 'none';
-            dropZone.style.opacity = '0.4';
+        // 1. Add body class
+        document.body.classList.add('read-only-active');
+        // 2. Create banner element
+        let banner = document.querySelector('.read-only-banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.className = 'read-only-banner';
+            banner.innerHTML = '🛑 信令伺服器中斷 — 唯讀模式 <span class="banner-close" id="readOnlyBannerClose">✕</span>';
+            document.body.insertBefore(banner, document.body.firstChild);
+            document.getElementById('readOnlyBannerClose').addEventListener('click', () => setReadOnly(false));
         }
+        // Trigger slide-in
+        requestAnimationFrame(() => banner.classList.add('active'));
+        // 3. Add data-write to interactive elements (skip admin-only)
+        document.querySelectorAll('button, input, textarea, select').forEach(el => {
+            if (!el.closest('.admin-panel') && !el.hasAttribute('data-write')) {
+                el.setAttribute('data-write', '');
+            }
+        });
+        // 4. Add read-only class to file drop zone
+        const dropZone = document.getElementById('fileDropZone');
+        if (dropZone) dropZone.classList.add('read-only');
         // 5. Close all open modal overlays
         document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
     } else {
-        // 1. Remove banner
-        banner.className = '';
-        banner.textContent = '';
-        // 2. Re-enable all buttons
-        document.querySelectorAll('button').forEach(el => { el.disabled = false; });
-        // 3. Re-enable all inputs, textareas, selects
-        document.querySelectorAll('input, textarea, select').forEach(el => { el.disabled = false; });
-        // 4. Restore file drop zone
-        const dropZone = document.getElementById('fileDropZone');
-        if (dropZone) {
-            dropZone.style.pointerEvents = '';
-            dropZone.style.opacity = '';
+        // 1. Remove body class
+        document.body.classList.remove('read-only-active');
+        // 2. Remove banner with slide-out
+        const banner = document.querySelector('.read-only-banner');
+        if (banner) {
+            banner.classList.remove('active');
+            banner.addEventListener('transitionend', () => banner.remove(), { once: true });
+            setTimeout(() => { if (banner.parentNode) banner.remove(); }, 400);
         }
+        // 3. Remove data-write attributes
+        document.querySelectorAll('[data-write]').forEach(el => el.removeAttribute('data-write'));
+        // 4. Remove read-only class from file drop zone
+        const dropZone = document.getElementById('fileDropZone');
+        if (dropZone) dropZone.classList.remove('read-only');
     }
 }
 
@@ -2462,7 +2512,20 @@ function handleWsMessage(data) {
         case 'room-state':
             APP.state.lastSyncTime = Date.now();
             APP.state.pendingSync = false;
-            // Merge server data with local: keep local-only items, server items take precedence
+            // 1. Filter out items the server has deleted (prevent ghost revival)
+            if (data.deletedNoticeIds) {
+                const deletedNoticeSet = new Set(data.deletedNoticeIds);
+                APP.state.noticePosts = APP.state.noticePosts.filter(p => !deletedNoticeSet.has(p.id));
+            }
+            if (data.deletedChecklistIds) {
+                const deletedChecklistSet = new Set(data.deletedChecklistIds);
+                APP.state.checklists = APP.state.checklists.filter(b => !deletedChecklistSet.has(b.id));
+            }
+            if (data.deletedKeyIds) {
+                const deletedKeySet = new Set(data.deletedKeyIds);
+                APP.state.keyManagements = APP.state.keyManagements.filter(e => !deletedKeySet.has(e.id));
+            }
+            // 2. Merge server data with local: keep local-only items, server items take precedence
             if (data.noticePosts) {
                 const serverPostIds = new Set(data.noticePosts.map(p => p.id));
                 const localOnlyPosts = APP.state.noticePosts.filter(p => !serverPostIds.has(p.id));
