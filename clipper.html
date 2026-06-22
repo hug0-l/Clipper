@@ -3517,39 +3517,9 @@ function updatePeerTargetUI() {
 
 
 // ========== File Transfer UI Wire-up ==========
+// All file-drop event bindings are handled by FilesModule._mount()
+// Legacy inline IIFE removed to prevent double dialog on click.
 
-(function() {
-    const dropZone = document.getElementById('fileDropZone');
-    const fileInput = document.getElementById('fileInput');
-    const clearBtn = document.getElementById('btnClearDone');
-
-    dropZone.addEventListener('click', (e) => {
-        if (e.target === dropZone || e.target.closest('.drop-zone-icon') || e.target.tagName === 'P') {
-            fileInput.click();
-        }
-    });
-    fileInput.addEventListener('change', () => {
-        if (fileInput.files.length > 0) {
-            handleFiles(fileInput.files);
-            fileInput.value = '';
-        }
-    });
-
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
-    });
-
-    clearBtn.addEventListener('click', () => {
-        APP.state.fileQueue = APP.state.fileQueue.filter(f => f.status !== 'done' && f.status !== 'error');
-        updateFileUI();
-    });
-
-    updateFileUI();
-})();
 // ========== Chat Room ==========
 
 function appendSystemMessage(text) {
