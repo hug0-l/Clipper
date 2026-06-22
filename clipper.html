@@ -3063,7 +3063,9 @@ if (!hasVisited) {
         document.getElementById('initOverlay').style.display = 'none';
         APP.updateStatus('disconnected');
         APP.showPairingUI(true);
-        APP.showStatusMsg('');
+        APP.showStatusMsg('⏳ 正在自動連線...');
+        // 立即自動連線
+        setTimeout(function() { joinRoom(); }, 100);
     });
 
     document.getElementById('btnInitRandom').addEventListener('click', function() {
