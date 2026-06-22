@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import sys
 import random
 import secrets
 import signal
@@ -333,7 +334,10 @@ def _generate_peer_id():
 
 
 # Mini HTTP server — serves static files + REST API on port 8766
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    _SCRIPT_DIR = sys._MEIPASS
+else:
+    _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _api_error_response(status, message):
