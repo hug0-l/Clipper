@@ -11,15 +11,49 @@ This file provides guidance to AI agents when working with this repository.
 ## Architecture
 
 ```
-├── clipper.html              # 主用戶端 SPA（WebRTC + WS + 所有功能模組，~4,550 行）
-├── signal_server.py          # 信令伺服器（WebSocket 配對 + 持久化儲存 + Relay，~1,400 行）
+├── clipper.html              # 主用戶端 SPA（WebRTC + WS + 所有功能）
+├── signal_server.py          # 信令伺服器入口（WebSocket 配對 + HTTP）
+├── services/                 # 伺服器邏輯模組
+│   ├── ws_router.py          #   WS 訊息路由表（@register 裝飾器模式）
+│   ├── persistence.py        #   SQLite 持久化層
+│   ├── room_service.py       #   房間管理 + peer 追蹤
+│   ├── chat_service.py       #   聊天備份／編輯
+│   ├── notice_service.py     #   公告欄 CRUD
+│   ├── checklist_service.py  #   檢查清單 CRUD（含拖曳排序 reorder_items）
+│   ├── keymgmt_service.py    #   密鑰管理 CRUD
+│   └── plugin_loader.py      #   Server 插件載入器
+├── js/                       # 前端 JavaScript 模組
+│   ├── core/                 #   核心基礎設施
+│   │   ├── message-bus.js    #    事件匯流排
+│   │   ├── ws-manager.js     #    WebSocket 管理器
+│   │   ├── module-base.js    #    模組基類
+│   │   ├── plugin-registry.js#    插件註冊與管理
+│   │   └── plugin-loader.js  #    動態插件載入
+│   └── modules/              #   功能模組
+│       ├── chat-module.js    #    聊天
+│       ├── files-module.js   #    檔案傳輸
+│       ├── notice-module.js  #    公告欄
+│       ├── checklist-module.js#   檢查清單
+│       ├── keymgmt-module.js #    密鑰管理
+│       ├── admin-module.js   #    管理面板
+│       ├── diagnostic-module.js # 診斷
+│       └── templates-module.js #  範本庫
+├── plugins/                  # Client 插件存放目錄
+│   ├── manifest.json
+│   └── counter-plugin.js     # 範例插件
+├── server_plugins/           # Server 插件存放目錄
+│   └── echo_plugin.py
+├── PLUGINS.md                # 插件開發文件
+├── README.md                 # 專案說明文件
 ├── clipper.spec              # PyInstaller 打包設定
-├── clipper-sdk.js            # 輕量 JS SDK (1,317 行)，0 外部依賴
-├── protocol.md               # 完整 WS API 規範 (1,936 行，48 種訊息類型)
+├── clipper-sdk.js            # 輕量 JS SDK, 0 外部依賴
+├── protocol.md               # 完整 WS API 規範
+├── manifest.json             # PWA manifest
+├── sw.js                     # Service Worker
 ├── .github/workflows/        # GitHub Actions CI/CD
 │   └── build.yml             # Windows + macOS 自動編譯 + Release
 ├── clipper_data.db           # SQLite 資料庫（啟動時自動建立）
-├── logs/                     # 每日日誌檔案（自動輪替，24h 保留）
+└── logs/                     # 每日日誌檔案（自動輪替，24h 保留）
 ```
 ## Protocol
 
@@ -33,18 +67,24 @@ This file provides guidance to AI agents when working with this repository.
 ## Key Patterns
 
 - **`APP.state`** — global state object in `clipper.html`. All state lives here.
-- **`handleWsMessage(data)`** — WS message router (switch on `data.type`). Unknown types fall through to `handleAdminMessage(data)`.
-- **`handleAdminMessage(data)`** — admin panel message handler, defined later in the script.
+- **`handleWsMessage(data)`** — legacy WS message router (switch on `data.type`). Now only handles core types (time-sync, relay, WebRTC, peer-list). Module-specific types are handled by their respective modules.
+- **`handleAdminMessage(data)`** — admin panel message handler, defined in admin-module.js.
 - **`sendWsMessage(obj)`** — send JSON to server.
 - **`sendToPeers(jsonStr, peerIds)`** — send via DC if open, else relay.
+- **`broadcastToPeers(jsonStr)`** — broadcast to all connected peers.
 - **`_broadcast(room_peers, message, exclude)`** — server-side broadcast.
+- **`wsManager.onMessage(types, handler, moduleName)`** — register WS handler with module isolation.
+- **`wsManager.dispatchMessage(data)`** — dispatch message through all registered handlers (used by DC handler).
 
 ## Common Tasks
 
-- **Add a new WS message type**: Add a `case 'your-type':` in `handleWsMessage()` (client) and a corresponding `elif msg_type == "your-type":` in `handler()` (server).
-- **Change persistence**: Server uses SQLite (`clipper_data.db`). Legacy JSON migration (`vcc_server_state.json`) runs automatically on first startup.
-- **Add admin feature**: Add a new `case` in `handleAdminMessage()`, a new `elif msg_type == "admin-*":` in server, and UI elements in the admin panel HTML.
+- **Add a new WS message type**: Create a handler function decorated with `@register("your-type")` in `services/ws_router.py` (server). On the client, either register via `wsManager.onMessage('your-type', handler, 'module-name')` or create a plugin via `ClipperPlugins.register()`.
+- **Create a client plugin**: Add a JS file to `plugins/` directory, register via `ClipperPlugins.register({name, tab, mount, wsHandlers, ...})`. See `PLUGINS.md` for full API.
+- **Create a server plugin**: Add a `.py` file to `server_plugins/` directory with `@register("type")` decorated handlers. Auto-loaded at startup.
+- **Change persistence**: Server uses SQLite (`clipper_data.db`). Data is persisted via `Persistence.save_room_data()`.
+- **Add admin feature**: Add a new `case` in `handleAdminMessage()` (admin-module.js), a new `elif msg_type == "admin-*":` in server, and UI elements in the admin panel HTML.
 - **File transfer**: Uses chunked transfer (16 KB chunks) over DC or WS relay. Each peer has an independent sending queue.
+- **Legacy cleanup**: Notice/keymgmt/file-cancel WS messages are handled by their respective modules, NOT in `handleWsMessage()`.
 
 ## Known Quirks
 
@@ -62,6 +102,8 @@ This file provides guidance to AI agents when working with this repository.
 - **SDK 檔案傳輸佇列**: `sendFile()` 放入 `_fileSendQueue`，依序傳送。`_fileSending` 旗標避免並行 flood。
 - **REST API**: `signal_server.py` 在 port 8766 提供 `GET /api/health`、`GET /api/rooms/:room/state`、`POST|PUT|DELETE /api/rooms/:room/notice` 等端點。CORS `*`。
 - **peerId 不顯示給用戶**: 三個 codebase（clipper.html / clipper-sdk.js / countdownctrl）的所有 UI 文字只顯示 `displayName`。`peerId` 只用於內部識別（Map key、`btn.title`）。
+- **插件系統**: 使用 `ClipperPlugins.register(desc)` 註冊 client 插件，`server_plugins/` 中的 `.py` 檔案自動載入為 server 插件。詳見 `PLUGINS.md`。
+- **i18n**: 使用 `_t(key)` 取得翻譯、`data-i18n` 屬性自動翻譯靜態文字、`_langSet(lang)` 切換語系。新增語言請在 `js/i18n/` 下建立檔案並註冊。詳見 `PLUGINS.md`。
 
 ## 🤖 CI/CD — GitHub Actions
 

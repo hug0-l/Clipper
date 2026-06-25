@@ -1,23 +1,9 @@
 """WebSocket message routing table for Clipper."""
 import json
-import random
 import time
-import asyncio
 from datetime import datetime, timezone
 
-from services.checklist_service import ChecklistService
-from services.notice_service import NoticeService
-from services.keymgmt_service import KeyMgmtService
-from services.chat_service import ChatService
-from services.persistence import Persistence
 
-
-# Module-level service instances
-_persistence = Persistence()
-checklist_service = ChecklistService(_persistence)
-notice_service = NoticeService(_persistence)
-keymgmt_service = KeyMgmtService(_persistence)
-chat_service = ChatService(_persistence)
 
 def _track_error(ctx, category, message, exc_info=None):
     """Increment error counter and log the error."""
@@ -284,7 +270,7 @@ async def h_checklistboard_create(websocket, data, ctx):
     ctx["ensure_room_data"](rid)
     board = data.get("board", {})
     broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
-    success, err = checklist_service.create_board(ctx["room_data"][rid], rid, board, broadcast_fn, ctx["log"])
+    success, err = ctx["checklist_service"].create_board(ctx["room_data"][rid], rid, board, broadcast_fn, ctx["log"])
     if not success:
         await websocket.send(json.dumps({"type": "error", "message": err}))
         return
@@ -298,7 +284,7 @@ async def h_checklistboard_edit(websocket, data, ctx):
         return
     ctx["ensure_room_data"](rid)
     broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
-    success, err = checklist_service.edit_board(ctx["room_data"][rid], rid, data, broadcast_fn)
+    success, err = ctx["checklist_service"].edit_board(ctx["room_data"][rid], rid, data, broadcast_fn)
     if not success:
         await websocket.send(json.dumps({"type": "error", "message": err}))
         return
@@ -313,7 +299,7 @@ async def h_checklistboard_delete(websocket, data, ctx):
     ctx["ensure_room_data"](rid)
     board_id = data.get("id")
     broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
-    success, err = checklist_service.delete_board(ctx["room_data"][rid], rid, board_id, broadcast_fn)
+    success, err = ctx["checklist_service"].delete_board(ctx["room_data"][rid], rid, board_id, broadcast_fn)
     if not success:
         await websocket.send(json.dumps({"type": "error", "message": err}))
         return
@@ -329,7 +315,7 @@ async def h_checklistboard_pin(websocket, data, ctx):
     pin_id = data.get("id")
     pin_val = data.get("pinned", False)
     broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
-    success, err = checklist_service.pin_board(ctx["room_data"][rid], rid, pin_id, pin_val, broadcast_fn)
+    success, err = ctx["checklist_service"].pin_board(ctx["room_data"][rid], rid, pin_id, pin_val, broadcast_fn)
     if not success:
         await websocket.send(json.dumps({"type": "error", "message": err}))
         return
@@ -346,7 +332,7 @@ async def h_checklistboard_remind(websocket, data, ctx):
     remind_at = data.get("reminderAt")
     remind_title = data.get("reminderTitle", "")
     broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
-    success, err = checklist_service.set_reminder(ctx["room_data"][rid], rid, remind_id, remind_at, remind_title, broadcast_fn, ctx["log"])
+    success, err = ctx["checklist_service"].set_reminder(ctx["room_data"][rid], rid, remind_id, remind_at, remind_title, broadcast_fn, ctx["log"])
     if not success:
         await websocket.send(json.dumps({"type": "error", "message": err}))
         return
@@ -362,7 +348,7 @@ async def h_checklist_add(websocket, data, ctx):
     checklist_id = data.get("checklistId")
     item = data.get("item", {})
     broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
-    success, err = checklist_service.add_item(ctx["room_data"][rid], rid, checklist_id, item, broadcast_fn)
+    success, err = ctx["checklist_service"].add_item(ctx["room_data"][rid], rid, checklist_id, item, broadcast_fn)
     if not success:
         await websocket.send(json.dumps({"type": "error", "message": err}))
         return
@@ -380,7 +366,7 @@ async def h_checklist_toggle(websocket, data, ctx):
     checked = data.get("checked", False)
     checked_at = data.get("checkedAt", time.time() * 1000)
     broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
-    success, err = checklist_service.toggle_item(ctx["room_data"][rid], rid, checklist_id, toggle_id, checked, checked_at, broadcast_fn)
+    success, err = ctx["checklist_service"].toggle_item(ctx["room_data"][rid], rid, checklist_id, toggle_id, checked, checked_at, broadcast_fn)
     if not success:
         await websocket.send(json.dumps({"type": "error", "message": err}))
         return
@@ -396,7 +382,7 @@ async def h_checklist_delete(websocket, data, ctx):
     checklist_id = data.get("checklistId")
     del_id = data.get("id")
     broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
-    success, err = checklist_service.delete_item(ctx["room_data"][rid], rid, checklist_id, del_id, broadcast_fn)
+    success, err = ctx["checklist_service"].delete_item(ctx["room_data"][rid], rid, checklist_id, del_id, broadcast_fn)
     if not success:
         await websocket.send(json.dumps({"type": "error", "message": err}))
         return
@@ -411,7 +397,23 @@ async def h_checklist_reset(websocket, data, ctx):
     ctx["ensure_room_data"](rid)
     board_id = data.get("id") or data.get("checklistId")
     broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
-    success, err = checklist_service.reset_items(ctx["room_data"][rid], rid, board_id, broadcast_fn, ctx["log"])
+    success, err = ctx["checklist_service"].reset_items(ctx["room_data"][rid], rid, board_id, broadcast_fn, ctx["log"])
+    if not success:
+        await websocket.send(json.dumps({"type": "error", "message": err}))
+        return
+
+
+@register("checklist-reorder")
+async def h_checklist_reorder(websocket, data, ctx):
+    rid = data.get("room")
+    if not rid or rid not in ctx["rooms"]:
+        await websocket.send(json.dumps({"type": "error", "message": "room not found"}))
+        return
+    ctx["ensure_room_data"](rid)
+    checklist_id = data.get("checklistId")
+    item_ids = data.get("itemIds", [])
+    broadcast_fn = lambda msg: ctx["broadcast"](ctx["rooms"][rid], msg, exclude=websocket)
+    success, err = ctx["checklist_service"].reorder_items(ctx["room_data"][rid], rid, checklist_id, item_ids, broadcast_fn)
     if not success:
         await websocket.send(json.dumps({"type": "error", "message": err}))
         return
@@ -432,7 +434,7 @@ async def h_state_get(websocket, data, ctx):
         "noticePosts": ctx["room_data"][rid].get("noticePosts", []),
         "checklists": ctx["room_data"][rid].get("checklists", []),
         "keyManagements": ctx["room_data"][rid].get("keyManagements", []),
-        "deletedNoticeIds": ctx["room_data"][rid].get("deletedPostIds", []),
+        "deletedPostIds": ctx["room_data"][rid].get("deletedPostIds", []),
         "deletedChecklistIds": ctx["room_data"][rid].get("deletedChecklistIds", []),
         "deletedKeyIds": ctx["room_data"][rid].get("deletedKeyIds", []),
     }))
@@ -516,6 +518,10 @@ async def h_ntp_config(websocket, data, ctx):
         "ntpOffset": round(ctx["ntp_config"]["offset"], 3),
         "ntpValid": ntp_valid,
     }))
+
+
+@register("register-name")
+async def h_register_name(websocket, data, ctx):
     my_peer_id = ctx["_my_peer_id"]
     rid = data.get("room")
     name = data.get("displayName", "").strip()
@@ -705,9 +711,17 @@ async def h_admin_set_config(websocket, data, ctx):
         return
     cfg = data.get("config", {})
     if "chatRetentionDays" in cfg:
-        ctx["config"]["chatRetentionDays"] = int(cfg["chatRetentionDays"])
+        days = int(cfg["chatRetentionDays"])
+        ctx["config"]["chatRetentionDays"] = days
+        ctx["chat_service"].set_retention_days(days)
     if "stunServer" in cfg:
         ctx["config"]["stunServer"] = str(cfg["stunServer"])
+    if "turnServer" in cfg:
+        ctx["config"]["turnServer"] = str(cfg["turnServer"])
+    if "turnUsername" in cfg:
+        ctx["config"]["turnUsername"] = str(cfg["turnUsername"])
+    if "turnCredential" in cfg:
+        ctx["config"]["turnCredential"] = str(cfg["turnCredential"])
     response = {"type": "admin-set-config-result", "success": True, "message": "設定已更新", "config": ctx["config"]}
     await websocket.send(json.dumps(response))
     ctx["log"]('ADMIN', f'{my_peer_id} updated server config')
@@ -928,16 +942,4 @@ async def h_diagnostic(websocket, data, ctx):
     }))
 
 
-# ──────────────────────────────────────────────
-# Utility helper used by handlers
-# ──────────────────────────────────────────────
-def _ts_val(v):
-    """Convert timestamp (epoch ms number or ISO string) to float (epoch ms)."""
-    if v is None:
-        return 0.0
-    if isinstance(v, str):
-        try:
-            return float(v)
-        except ValueError:
-            return datetime.fromisoformat(v.replace('Z', '+00:00')).timestamp() * 1000
-    return float(v)
+

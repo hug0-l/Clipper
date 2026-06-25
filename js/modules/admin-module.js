@@ -73,6 +73,8 @@ class AdminModule extends ClipperModule {
                     if (window.diagnosticModule) {
                         window.diagnosticModule.requestFullDiagnostic();
                     }
+                } else if (tab === 'plugins') {
+                    this._renderPluginList();
                 }
             });
         });
@@ -151,6 +153,20 @@ class AdminModule extends ClipperModule {
             sendWsMessage({type: 'admin-set-config', token: this._adminToken, config: {stunServer: server}});
         });
 
+        // TURN save
+        this._listenOne('btnSaveAdminTurn', 'click', () => {
+            if (!this._adminToken) return;
+            const server = document.getElementById('adminTurnServer').value.trim();
+            const username = document.getElementById('adminTurnUsername').value.trim();
+            const credential = document.getElementById('adminTurnCredential').value.trim();
+            const config = {};
+            if (server) config.turnServer = server;
+            if (username) config.turnUsername = username;
+            if (credential) config.turnCredential = credential;
+            sendWsMessage({type: 'admin-set-config', token: this._adminToken, config});
+            APP.showStatusMsg('✅ TURN 設定已更新');
+        });
+
         // Export/Import
         this._listenOne('btnExportDump', 'click', () => {
             if (!this._adminPassword) return;
@@ -184,6 +200,100 @@ class AdminModule extends ClipperModule {
         this._listenOne('btnDump', 'click', () => {
             sendWsMessage({type: 'dump'});
             APP.showStatusMsg('正在請求伺服器資料...');
+        });
+
+        // Plugin Management
+        this._listenOne('btnPluginRefresh', 'click', () => this._renderPluginList());
+        this._listenOne('btnPluginLoadUrl', 'click', () => {
+            document.getElementById('pluginLoadUrlDialog').style.display = 'block';
+            document.getElementById('pluginUrlInput').focus();
+        });
+        this._listenOne('btnPluginUrlCancel', 'click', () => {
+            document.getElementById('pluginLoadUrlDialog').style.display = 'none';
+        });
+        this._listenOne('btnPluginUrlLoad', 'click', () => {
+            const url = document.getElementById('pluginUrlInput').value.trim();
+            if (!url) { APP.showStatusMsg('❌ 請輸入插件網址'); return; }
+            document.getElementById('pluginLoadUrlDialog').style.display = 'none';
+            document.getElementById('pluginUrlInput').value = '';
+            if (window.pluginLoader) {
+                window.pluginLoader.loadFromUrl(url).then(() => {
+                    this._renderPluginList();
+                    APP.showStatusMsg('✅ 插件已載入');
+                }).catch((err) => {
+                    APP.showStatusMsg('❌ 載入失敗: ' + (err.message || err));
+                });
+            }
+        });
+        this._listenOne('filePluginLoad', 'change', function() {
+            const file = this.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const script = document.createElement('script');
+                script.textContent = e.target.result;
+                document.body.appendChild(script);
+                document.getElementById('filePluginLoad').value = '';
+                if (window.pluginRegistry) {
+                    setTimeout(() => {
+                        if (window.adminModule) window.adminModule._renderPluginList();
+                    }, 100);
+                }
+                APP.showStatusMsg('✅ 插件已從檔案載入');
+            };
+            reader.readAsText(file);
+        });
+    }
+
+    _renderPluginList() {
+        const container = document.getElementById('pluginListContainer');
+        const countEl = document.getElementById('pluginCount');
+        if (!container) return;
+        const plugins = window.ClipperPlugins ? window.ClipperPlugins.getPlugins() : [];
+        if (countEl) countEl.textContent = plugins.length;
+        if (plugins.length === 0) {
+            container.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;">暫無插件</div>';
+            return;
+        }
+        const self = this;
+        container.innerHTML = plugins.map(function(p) {
+            const enabled = window.ClipperPlugins ? window.ClipperPlugins.isPluginEnabled(p.name) : true;
+            const handlerTypes = (p._handlerTypes && p._handlerTypes.length) ? p._handlerTypes.join(', ') : '無';
+            return '<div class="keymgmt-card" style="border-left-color:' + (enabled ? '#22c55e' : '#64748b') + '">'
+                + '<div class="keymgmt-card-header">'
+                + '<span class="keymgmt-active-badge ' + (enabled ? 'on' : 'off') + '">' + (enabled ? '🟢 啟用' : '⚫ 停用') + '</span>'
+                + '<span class="keymgmt-card-label">' + (p.icon || '🔌') + ' ' + escapeHtml(p.displayName || p.name) + '</span>'
+                + '<span style="font-size:12px;color:#64748b;">v' + (p.version || '0.0.0') + '</span>'
+                + '<span style="flex:1;"></span>'
+                + '<button class="btn-icon" data-action="toggle-plugin" data-name="' + p.name + '" title="' + (enabled ? '停用' : '啟用') + '">' + (enabled ? '⏸' : '▶️') + '</button>'
+                + '<button class="btn-icon" data-action="remove-plugin" data-name="' + p.name + '" title="移除" style="color:#ef4444;">🗑</button>'
+                + '</div>'
+                + '<div style="font-size:13px;color:#94a3b8;margin-top:4px;">' + escapeHtml(p.description || '') + '</div>'
+                + '<div style="font-size:12px;color:#64748b;margin-top:4px;">WS handlers: ' + handlerTypes + ' | Tab: ' + (p.tab ? (p.tab.position || 'dropdown') : '無') + '</div>'
+                + '</div>';
+        }).join('');
+
+        container.querySelectorAll('[data-action="toggle-plugin"]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                const name = this.dataset.name;
+                if (window.ClipperPlugins) {
+                    const enabled = window.ClipperPlugins.isPluginEnabled(name);
+                    window.ClipperPlugins.setPluginEnabled(name, !enabled);
+                    self._renderPluginList();
+                    APP.showStatusMsg((enabled ? '⏸ 已停用' : '▶️ 已啟用') + ' 插件: ' + name);
+                }
+            });
+        });
+        container.querySelectorAll('[data-action="remove-plugin"]').forEach(function(btn) {
+            btn.addEventListener('click', async function() {
+                const name = this.dataset.name;
+                if (!await showConfirmDialog('確定移除插件「' + name + '」？')) return;
+                if (window.ClipperPlugins) {
+                    window.ClipperPlugins.unregisterPlugin(name);
+                    self._renderPluginList();
+                    APP.showStatusMsg('🗑 插件已移除: ' + name);
+                }
+            });
         });
     }
 

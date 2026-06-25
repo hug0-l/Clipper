@@ -1,10 +1,11 @@
 # Clipper WebSocket 協定文件
 
-> **版本**：1.1.0  
+> **版本**：2.2.0  
 > **通訊埠**：WebSocket 8765 · HTTP 8766  
 > **傳輸**：JSON text frames  
 > **房間模式**：4 位數字配對碼  
-> **連線方式**：`ws://localhost:8765`
+> **連線方式**：`ws://localhost:8765`  
+> **支援插件**: Client 插件 (`ClipperPlugins.register`) + Server 插件 (`@register` decorator)
 
 ---
 
@@ -100,7 +101,8 @@ sequenceDiagram
 | | Server→Client | `chat-history-result` |
 | **公告欄** | 雙向 | `notice-create`, `notice-edit`, `notice-delete`, `notice-pin` |
 | **檢查清單 Board** | 雙向 | `checklistboard-create`, `checklistboard-edit`, `checklistboard-delete`, `checklistboard-pin`, `checklistboard-remind` |
-| **檢查清單項目** | 雙向 | `checklist-add`, `checklist-toggle`, `checklist-delete`, `checklist-reset` |
+| **檢查清單項目** | 雙向 | `checklist-add`, `checklist-toggle`, `checklist-delete`, `checklist-reset`, `checklist-reorder` |
+| **插件系統** | 動態 | Client: `ClipperPlugins.register(desc)` · Server: `@register("plugin-*")` |
 | **密鑰管理** | 雙向 | `keymgmt-create`, `keymgmt-edit`, `keymgmt-delete`, `keymgmt-toggle-active`, `keymgmt-set-program` |
 | **WS 中繼** | 雙向 | `relay-data`, `relay-chunk`, `file-cancel` |
 | **成員管理** | Server→Client | `room_peers`, `peer_joined`, `peer_left`, `peer-list` |
@@ -469,7 +471,7 @@ WebRTC ICE Candidate。
       "updatedAt": 1700000000000
     }
   ],
-  "deletedNoticeIds": ["deleted-uuid-1"],
+  "deletedPostIds": ["deleted-uuid-1"],
   "deletedChecklistIds": ["deleted-uuid-2"],
   "deletedKeyIds": ["deleted-uuid-3"]
 }
@@ -1097,6 +1099,34 @@ WebRTC ICE Candidate。
 
 ---
 
+#### `checklist-reorder`
+
+重新排序 Board 內的項目。
+
+- **方向**：雙向
+- **說明**：透過拖曳變更項目順序，廣播新的 itemIds 順序給所有成員。
+
+**Request**：
+```json
+{
+  "type": "checklist-reorder",
+  "room": "1234",
+  "checklistId": "board-uuid",
+  "itemIds": ["item-3", "item-1", "item-2"]
+}
+```
+
+**Broadcast**：
+```json
+{
+  "type": "checklist-reorder",
+  "checklistId": "board-uuid",
+  "itemIds": ["item-3", "item-1", "item-2"]
+}
+```
+
+---
+
 ### 3.11 密鑰管理
 
 #### `keymgmt-create`
@@ -1308,6 +1338,7 @@ WebRTC ICE Candidate。
   | `file-meta` | 檔案傳送詮釋資料（檔名、大小、類型） |
   | `file-done` | 檔案傳送完成通知 |
   | `ack` | 送達確認（含 msgId） |
+  | `plugin-*` | 插件自訂類型（如 `plugin-counter-update`） |
 
 ---
 
@@ -1664,7 +1695,7 @@ WebRTC ICE Candidate。
 更新伺服器設定。
 
 - **方向**：Client→Server → Server→Client
-- **說明**：僅允許更新安全的設定項目（chatRetentionDays、stunServer）。
+- **說明**：更新伺服器設定（chatRetentionDays、stunServer、turnServer、turnUsername、turnCredential）。
 
 **Request**：
 ```json
@@ -1673,7 +1704,10 @@ WebRTC ICE Candidate。
   "token": "session-token",
   "config": {
     "chatRetentionDays": 14,
-    "stunServer": "stun:stun.example.com:19302"
+    "stunServer": "stun:stun.example.com:19302",
+    "turnServer": "turn:turn.example.com:3478",
+    "turnUsername": "user",
+    "turnCredential": "pass"
   }
 }
 ```
@@ -1686,7 +1720,10 @@ WebRTC ICE Candidate。
   "message": "設定已更新",
   "config": {
     "chatRetentionDays": 14,
-    "stunServer": "stun:stun.example.com:19302"
+    "stunServer": "stun:stun.example.com:19302",
+    "turnServer": "turn:turn.example.com:3478",
+    "turnUsername": "user",
+    "turnCredential": "pass"
   }
 }
 ```
@@ -1763,9 +1800,10 @@ WebRTC ICE Candidate。
 ### 步驟 1：過濾已刪除 ID（防幽靈復活）
 
 ```javascript
-// 1a. 過濾公告欄
-if (data.deletedNoticeIds) {
-    const deletedSet = new Set(data.deletedNoticeIds);
+// 1a. 過濾公告欄 (支援 deletedPostIds 與 legacy deletedNoticeIds)
+const deletedNoticeIds = data.deletedPostIds || data.deletedNoticeIds;
+if (deletedNoticeIds) {
+    const deletedSet = new Set(deletedNoticeIds);
     APP.state.noticePosts = APP.state.noticePosts.filter(p => !deletedSet.has(p.id));
 }
 
@@ -1931,6 +1969,6 @@ sequenceDiagram
 ---
 
 > **文件維護者**：Clipper Team  
-> **最後更新**：2026-06-20  
-> **對應源碼**：`signal_server.py` · `clipper.html`  
-> **相關文件**：[AGENTS.md](AGENTS.md) · [README.md](README.md)
+> **最後更新**：2026-06-25  
+> **對應源碼**：`signal_server.py` · `services/ws_router.py` · `clipper.html` · `js/core/plugin-registry.js`  
+> **相關文件**：[AGENTS.md](AGENTS.md) · [README.md](README.md) · [PLUGINS.md](PLUGINS.md)

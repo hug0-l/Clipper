@@ -140,6 +140,29 @@ class WSManager {
         this._stopReconnect();
     }
 
+    /**
+     * Dispatch a parsed message object through all registered handlers (wildcard then typed).
+     * Used by external code (e.g. DataChannel message handler) to route messages to plugins.
+     */
+    dispatchMessage(data) {
+        if (!data || !data.type) return;
+        this._bus.emit('server-message', { msg: data, type: data.type });
+        const wildcard = this._handlers.get('*') || [];
+        for (const { handler, moduleName } of wildcard) {
+            try { handler(data, this); } catch (err) {
+                console.error(`[WS] Handler error in module "${moduleName}" for type "${data.type}":`, err);
+                this._bus.emit('module-error', { module: moduleName, error: err, type: data.type });
+            }
+        }
+        const handlers = this._handlers.get(data.type) || [];
+        for (const { handler, moduleName } of handlers) {
+            try { handler(data, this); } catch (err) {
+                console.error(`[WS] Handler error in module "${moduleName}" for type "${data.type}":`, err);
+                this._bus.emit('module-error', { module: moduleName, error: err, type: data.type });
+            }
+        }
+    }
+
     // ---- internal ----
 
     _onMessage(event) {
@@ -150,29 +173,7 @@ class WSManager {
             console.warn('[WS] Non-JSON message', event.data);
             return;
         }
-        this._bus.emit('server-message', { msg: data, type: data.type });
-
-        // Wildcard handlers run first
-        const wildcard = this._handlers.get('*') || [];
-        for (const { handler, moduleName } of wildcard) {
-            try {
-                handler(data, this);
-            } catch (err) {
-                console.error(`[WS] Handler error in module "${moduleName}" for type "${data.type}":`, err);
-                this._bus.emit('module-error', { module: moduleName, error: err, type: data.type });
-            }
-        }
-
-        // Type-specific handlers
-        const handlers = this._handlers.get(data.type) || [];
-        for (const { handler, moduleName } of handlers) {
-            try {
-                handler(data, this);
-            } catch (err) {
-                console.error(`[WS] Handler error in module "${moduleName}" for type "${data.type}":`, err);
-                this._bus.emit('module-error', { module: moduleName, error: err, type: data.type });
-            }
-        }
+        this.dispatchMessage(data);
     }
 
     _startReconnect() {

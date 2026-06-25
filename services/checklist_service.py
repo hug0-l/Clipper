@@ -133,6 +133,20 @@ class ChecklistService:
             self.persistence.save_room_data(room_id, room_data)
         return True, None
 
+    def reorder_items(self, room_data, room_id, checklist_id, item_ids, broadcast_fn):
+        """Reorder items in a checklist board."""
+        if not checklist_id or not item_ids:
+            return False, "checklistId and item_ids required"
+        for board in room_data.get("checklists", []):
+            if board.get("id") == checklist_id:
+                item_map = {i.get("id"): i for i in board.get("items", [])}
+                board["items"] = [item_map[iid] for iid in item_ids if iid in item_map]
+                break
+        broadcast_fn({"type": "checklist-reorder", "checklistId": checklist_id, "itemIds": item_ids})
+        if self.persistence:
+            self.persistence.save_room_data(room_id, room_data)
+        return True, None
+
     def reset_items(self, room_data, room_id, board_id, broadcast_fn, log_fn):
         """Uncheck all items in a checklist board."""
         if not board_id:

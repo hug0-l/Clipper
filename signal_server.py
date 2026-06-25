@@ -34,8 +34,9 @@ LOG_DIR = "logs"
 LOG_RETENTION_HOURS = 24
 DEFAULT_ADMIN_PASSWORD = "12345"
 DEBUG = True   # Toggle verbose debug output
+ALLOWED_ORIGINS = os.environ.get("CLIPPER_ALLOWED_ORIGINS", "").split(",") if os.environ.get("CLIPPER_ALLOWED_ORIGINS") else []
 
-_config = {"chatRetentionDays": CHAT_RETENTION_DAYS, "stunServer": "stun:stun.l.google.com:19302"}
+_config = {"chatRetentionDays": CHAT_RETENTION_DAYS, "stunServer": "stun:stun.l.google.com:19302", "turnServer": "", "turnUsername": "", "turnCredential": ""}
 _ntp_config = {"server": "stdtime.gov.hk", "offset": 0.0, "enabled": True}
 _sessions = {}  # token -> {"createdAt": timestamp}
 _login_attempts = {}  # websocket_id -> {"count": int, "first": timestamp}
@@ -61,23 +62,14 @@ room_service = RoomService(persistence, rooms, peer_ids, MAX_PEERS_PER_ROOM)
 
 # Global key management service instance
 keymgmt_service = KeyMgmtService(persistence)
+
+# Global checklist service instance (added to ctx for WS handlers)
+from services.checklist_service import ChecklistService
+checklist_service = ChecklistService(persistence)
+
 # Error counts for diagnostic snapshot
 _error_counts = {}
-
-MAX_PEERS_PER_ROOM = 50
-CHAT_RETENTION_DAYS = 7
-DB_PATH = "clipper_data.db"
-LOG_DIR = "logs"
-LOG_RETENTION_HOURS = 24
-DEFAULT_ADMIN_PASSWORD = "12345"
-DEBUG = True   # Toggle verbose debug output
-_config = {"chatRetentionDays": CHAT_RETENTION_DAYS, "stunServer": "stun:stun.l.google.com:19302"}  # mutable config for runtime changes
-_ntp_config = {"server": "stdtime.gov.hk", "offset": 0.0, "enabled": True}
-_sessions = {}  # token -> {"createdAt": timestamp}
-_login_attempts = {}  # websocket_id -> {"count": int, "first": timestamp}
-MAX_LOGIN_ATTEMPTS = 5
-LOGIN_COOLDOWN = 30  # seconds
-SESSION_TIMEOUT = 1800  # 30 minutes
+_broadcast_semaphore = asyncio.Semaphore(20)
 
 
 def _setup_logging():
@@ -112,28 +104,42 @@ def _log(category, message):
 
 _log._file = None
 
-def _hash_password(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
+def _hash_password(pw, salt=None):
+    """Hash password with salt. Format: 'salt$hash' or 'hash' (legacy)."""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100000).hex()
+    return salt + '$' + h
+
+def _verify_password_stored(pw, stored):
+    """Verify password against stored value (handles salted and legacy)."""
+    import hmac
+    if '$' in stored:
+        salt, expected = stored.split('$', 1)
+        computed = hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100000).hex()
+        return hmac.compare_digest(computed, expected)
+    else:
+        return hmac.compare_digest(hashlib.sha256(pw.encode()).hexdigest(), stored)
 
 def _init_admin_password():
     """Insert default admin password if not set."""
     conn = sqlite3.connect(DB_PATH)
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS admin (key TEXT PRIMARY KEY, value TEXT)")
-        conn.execute("INSERT OR IGNORE INTO admin VALUES ('password', ?)", (_hash_password(DEFAULT_ADMIN_PASSWORD),))
-        conn.commit()
+        stored = conn.execute("SELECT value FROM admin WHERE key='password'").fetchone()
+        if not stored:
+            conn.execute("INSERT INTO admin VALUES ('password', ?)", (_hash_password(DEFAULT_ADMIN_PASSWORD),))
+            conn.commit()
     finally:
         conn.close()
 
 def _verify_admin_password(pw):
-    """Constant-time password comparison to prevent timing attacks."""
-    import hmac
     conn = sqlite3.connect(DB_PATH)
     try:
         row = conn.execute("SELECT value FROM admin WHERE key='password'").fetchone()
         if not row:
             return False
-        return hmac.compare_digest(_hash_password(pw), row[0])
+        return _verify_password_stored(pw, row[0])
     finally:
         conn.close()
 
@@ -209,20 +215,7 @@ def _init_db():
 def _load_state():
     """Load all rooms from SQLite into memory."""
     global room_data
-    room_data = {}
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        rows = conn.execute("SELECT room_id, notice_posts, checklists, chat_messages, key_managements FROM rooms").fetchall()
-        for rid, np, cl, cm, km in rows:
-            room_data[rid] = {
-                "noticePosts": json.loads(np),
-                "checklists": json.loads(cl),
-                "chatMessages": json.loads(cm),
-                "keyManagements": json.loads(km),
-            }
-    except sqlite3.OperationalError:
-        pass  # table doesn't exist yet
-    conn.close()
+    room_data = persistence.load_all_rooms() or {}
     # Migrate old JSON if exists
     OLD_JSON = "vcc_server_state.json"
     if os.path.exists(OLD_JSON):
@@ -240,21 +233,8 @@ def _load_state():
 
 
 def _save_state():
-    """Write all rooms to SQLite atomically."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        with conn:
-            for rid, data in room_data.items():
-                conn.execute(
-                    "INSERT OR REPLACE INTO rooms VALUES (?,?,?,?,?)",
-                    (rid,
-                     json.dumps(data.get("noticePosts", [])),
-                     json.dumps(data.get("checklists", [])),
-                     json.dumps(data.get("chatMessages", [])),
-                     json.dumps(data.get("keyManagements", [])))
-                )
-    finally:
-        conn.close()
+    """Write all rooms to SQLite."""
+    persistence.save_many_rooms(room_data)
 
 
 def _migrate_room_data():
@@ -363,7 +343,7 @@ def _api_room_state(room_id):
         "noticePosts": rd.get("noticePosts", []),
         "checklists": rd.get("checklists", []),
         "keyManagements": rd.get("keyManagements", []),
-        "deletedNoticeIds": rd.get("deletedPostIds", []),
+        "deletedPostIds": rd.get("deletedPostIds", []),
         "deletedChecklistIds": rd.get("deletedChecklistIds", []),
         "deletedKeyIds": rd.get("deletedKeyIds", []),
     }, 200
@@ -613,18 +593,29 @@ async def _mini_http(reader, writer):
                     except json.JSONDecodeError:
                         response_data, status_code = {"error": "invalid JSON"}, 400
                 elif rest_path == "client-log" and method == "POST":
-                    entries = json.loads(body)
-                    if isinstance(entries, dict) and 'entries' in entries:
-                        entries = entries['entries']
-                    if isinstance(entries, list):
-                        for entry in entries:
-                            ts = entry.get('ts', datetime.now(timezone.utc).isoformat())
-                            level = entry.get('level', 'log')
-                            msg = entry.get('msg', '')
-                            _log(f'CLIENT-{level.upper()}', f'{msg}')
-                        response_data, status_code = {"status": "ok", "count": len(entries)}, 200
+                    # Rate limit: skip if too many requests
+                    client_ip = writer.get_extra_info('peername')[0] if hasattr(writer, 'get_extra_info') else '?'
+                    now = time.time()
+                    if not hasattr(_mini_http, '_log_limits'):
+                        _mini_http._log_limits = {}
+                    limits = _mini_http._log_limits
+                    last = limits.get(client_ip, 0)
+                    if now - last < 1.0:
+                        response_data, status_code = {"status": "ok", "count": 0}, 200
                     else:
-                        response_data, status_code = {"error": "expected list"}, 400
+                        limits[client_ip] = now
+                        try:
+                            entries = json.loads(body)
+                            if isinstance(entries, dict) and 'entries' in entries:
+                                entries = entries['entries']
+                            if isinstance(entries, list):
+                                for entry in entries:
+                                    _log(f'CLIENT-{entry.get("level","log").upper()}', entry.get('msg',''))
+                                response_data, status_code = {"status": "ok", "count": len(entries)}, 200
+                            else:
+                                response_data, status_code = {"error": "expected list"}, 400
+                        except json.JSONDecodeError:
+                            response_data, status_code = {"error": "invalid JSON"}, 400
                 elif rest_path.startswith("rooms/"):
                     sub = rest_path[len("rooms/"):]
                     slash_idx = sub.find("/")
@@ -634,8 +625,10 @@ async def _mini_http(reader, writer):
                     else:
                         room_id = sub[:slash_idx]
                         sub_resource = sub[slash_idx+1:]
-
-                    if sub_resource is None:
+                    # Validate room_id: only allow digits and dashes
+                    if not all(c.isdigit() or c == '-' for c in room_id):
+                        response_data, status_code = {"error": "invalid room id"}, 400
+                    elif sub_resource is None:
                         response_data, status_code = {"error": "missing resource"}, 404
                     elif sub_resource in ("notice", "checklist", "keymgmt") and method in ("POST", "PUT", "DELETE"):
                         auth_header = headers.get("authorization", "")
@@ -667,7 +660,7 @@ async def _mini_http(reader, writer):
             body_out = json.dumps(response_data).encode()
             status_msg = {
                 200: b"200 OK", 201: b"201 Created", 400: b"400 Bad Request",
-                404: b"404 Not Found", 405: b"405 Method Not Allowed",
+                401: b"401 Unauthorized", 404: b"404 Not Found", 405: b"405 Method Not Allowed",
                 500: b"500 Internal Server Error",
             }.get(status_code, b"500 Internal Server Error")
             resp = (
@@ -707,20 +700,15 @@ async def _mini_http(reader, writer):
         except: pass
 
 
-def _generate_peer_id():
-    """Generate a unique 4-char uppercase alphanumeric peer ID."""
-    chars = string.ascii_uppercase + string.digits
-    while True:
-        pid = "".join(random.choices(chars, k=4))
-        if pid not in peer_ids:
-            peer_ids.add(pid)
-            return pid
-
-
-
-
 async def handler(websocket):
     """Handle a WebSocket connection."""
+    # Optional origin check (set CLIPPER_ALLOWED_ORIGINS env var)
+    if ALLOWED_ORIGINS:
+        origin = websocket.request_headers.get("Origin", "") if hasattr(websocket, 'request_headers') else ""
+        if origin and not any(origin.startswith(o) for o in ALLOWED_ORIGINS):
+            _log('SECURITY', f'Blocked connection from origin: {origin}')
+            await websocket.close(4003, "origin not allowed")
+            return
     room_id = None
     my_peer_id = None
 
@@ -734,6 +722,7 @@ async def handler(websocket):
         "persistence": persistence,
         "chat_service": chat_service,
         "notice_service": notice_service,
+        "checklist_service": checklist_service,
         "room_service": room_service,
         "keymgmt_service": keymgmt_service,
         "config": _config,
@@ -760,7 +749,14 @@ async def handler(websocket):
         "DEBUG": DEBUG,
         "LOG_DIR": LOG_DIR,
         "DB_PATH": DB_PATH,
-        "LOG_RETENTION_HOURS": LOG_RETENTION_HOURS,        "_error_counts": _error_counts,
+        "LOG_RETENTION_HOURS": LOG_RETENTION_HOURS,
+        "_error_counts": _error_counts,
+        # Plugin persistence API
+        "plugin_set": persistence.plugin_set,
+        "plugin_get": persistence.plugin_get,
+        "plugin_delete": persistence.plugin_delete,
+        "plugin_list": persistence.plugin_list,
+        "plugin_clear": persistence.plugin_clear,
     }
 
     try:
@@ -797,21 +793,25 @@ async def handler(websocket):
         _log('DISCONNECT', f'{my_peer_id} disconnected (room: {room_id})')
 
 
+async def _send_with_semaphore(ws, payload):
+    async with _broadcast_semaphore:
+        try:
+            await ws.send(payload)
+        except websockets.exceptions.ConnectionClosed:
+            pass
+
 def _broadcast(room_peers, message, exclude=None):
     """Send a message to all peers in a room, optionally excluding one."""
     payload = json.dumps(message)
-    target_ids = []
+    count = 0
     for info in room_peers.values():
         if exclude and info["ws"] == exclude:
             continue
-        target_ids.append('?')
-        try:
-            asyncio.create_task(info["ws"].send(payload))
-        except websockets.exceptions.ConnectionClosed:
-            pass
+        count += 1
+        asyncio.create_task(_send_with_semaphore(info["ws"], payload))
     if DEBUG:
         mtype = message.get("type", "?")
-        _debug(f"→ TX broadcast type={mtype} to={len(target_ids)} peers")
+        _debug(f"→ TX broadcast type={mtype} to={count} peers")
 
 
 async def _broadcast_peer_list(rid):
@@ -917,15 +917,6 @@ async def main():
     log_path = _setup_logging()
     _rotate_logs()
     _init_db()
-    # Add key_managements column for existing databases
-    _migrate_conn = sqlite3.connect(DB_PATH)
-    try:
-        _migrate_conn.execute("ALTER TABLE rooms ADD COLUMN key_managements TEXT NOT NULL DEFAULT '[]'")
-        _migrate_conn.commit()
-    except sqlite3.OperationalError:
-        pass  # column already exists
-    finally:
-        _migrate_conn.close()
     _init_admin_password()
     _load_state()
     _migrate_room_data()
@@ -950,6 +941,13 @@ async def main():
     _log('STARTUP', f'Data: {total_notices} notices, {total_boards} boards, {total_chats} chat backups')
     _log('STARTUP', f'Chat retention: {CHAT_RETENTION_DAYS} days')
     _log('STARTUP', f'DEBUG mode: {"ON" if DEBUG else "OFF"}')
+
+    # Load server-side plugins
+    from services.plugin_loader import load_plugins
+    loaded_plugins = load_plugins()
+    if loaded_plugins:
+        _log('STARTUP', f'Loaded {len(loaded_plugins)} server plugin(s): {", ".join(loaded_plugins)}')
+
     ws_scheme = "wss" if ssl_context else "ws"
     http_scheme = "https" if ssl_context else "http"
     _log('STARTUP', f'listening on {ws_scheme}://localhost:8765  |  {http_scheme}://localhost:8766')

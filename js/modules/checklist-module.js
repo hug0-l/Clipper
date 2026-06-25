@@ -29,7 +29,8 @@ class ChecklistModule extends ClipperModule {
         wsManager.onMessage([
             'checklistboard-create', 'checklistboard-edit', 'checklistboard-delete',
             'checklistboard-pin', 'checklistboard-remind',
-            'checklist-add', 'checklist-toggle', 'checklist-delete', 'checklist-reset'
+            'checklist-add', 'checklist-toggle', 'checklist-delete', 'checklist-reset',
+            'checklist-reorder'
         ], (data) => this.handleServerMessage(data), 'checklist');
 
         this._reminderTimer = null;
@@ -170,6 +171,18 @@ class ChecklistModule extends ClipperModule {
                         item.checked = false;
                         item.checkedAt = null;
                     }
+                    saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
+                    this.renderBoards();
+                }
+                break;
+            }
+
+            case 'checklist-reorder': {
+                const roBoard = APP.state.checklists.find(b => b.id === data.checklistId);
+                if (roBoard && data.itemIds) {
+                    const itemMap = {};
+                    for (const item of roBoard.items) itemMap[item.id] = item;
+                    roBoard.items = data.itemIds.map(id => itemMap[id]).filter(Boolean);
                     saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
                     this.renderBoards();
                 }
@@ -323,6 +336,51 @@ class ChecklistModule extends ClipperModule {
                 self._deleteItem(this.dataset.boardId, this.dataset.itemId);
             });
         });
+
+        // ── Drag & Drop Reorder ──
+        let dragSrcItem = null;
+        container.querySelectorAll('.checklist-board-item[draggable]').forEach(el => {
+            el.addEventListener('dragstart', function(e) {
+                dragSrcItem = this;
+                this.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', this.dataset.itemId);
+            });
+            el.addEventListener('dragend', function() {
+                this.classList.remove('dragging');
+                container.querySelectorAll('.checklist-board-item').forEach(i => i.classList.remove('drag-over'));
+            });
+            el.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                container.querySelectorAll('.checklist-board-item').forEach(i => i.classList.remove('drag-over'));
+                this.classList.add('drag-over');
+            });
+            el.addEventListener('dragleave', function() {
+                this.classList.remove('drag-over');
+            });
+            el.addEventListener('drop', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.classList.remove('drag-over');
+                if (!dragSrcItem || dragSrcItem === this) return;
+                const boardId = this.dataset.boardId;
+                const board = APP.state.checklists.find(b => b.id === boardId);
+                if (!board) return;
+                const fromId = dragSrcItem.dataset.itemId;
+                const toId = this.dataset.itemId;
+                const fromIdx = board.items.findIndex(i => i.id === fromId);
+                const toIdx = board.items.findIndex(i => i.id === toId);
+                if (fromIdx < 0 || toIdx < 0) return;
+                const [moved] = board.items.splice(fromIdx, 1);
+                board.items.splice(toIdx, 0, moved);
+                // Mark sort order
+                board.items.forEach((item, idx) => item._sortOrder = idx);
+                saveToStorage(APP.roomKey('vcc_checklists'), APP.state.checklists);
+                sendWsMessage({type: 'checklist-reorder', room: APP.state.room, checklistId: boardId, itemIds: board.items.map(i => i.id)});
+                self.renderBoards();
+            });
+        });
     }
 
     _renderTags(tags) {
@@ -345,13 +403,13 @@ class ChecklistModule extends ClipperModule {
         if (!board.items || board.items.length === 0) return '';
         const items = [...board.items].sort((a, b) => {
             if (a.checked !== b.checked) return a.checked ? 1 : -1;
-            if (!a.checked) return a.timestamp - b.timestamp;
+            if (!a.checked) return a._sortOrder || a.timestamp || 0 - (b._sortOrder || b.timestamp || 0);
             return (b.checkedAt || 0) - (a.checkedAt || 0);
         });
-        return items.map(item => {
+        return items.map((item, idx) => {
             const timeStr = new Date(item.timestamp).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'});
             const doneClass = item.checked ? ' done' : '';
-            return '<div class="checklist-board-item' + doneClass + '">'
+            return '<div class="checklist-board-item' + doneClass + '" draggable="true" data-board-id="' + board.id + '" data-item-id="' + item.id + '" data-index="' + idx + '">'
                 + '<input type="checkbox" class="checklist-board-item-checkbox" data-board-id="' + board.id + '" data-item-id="' + item.id + '" ' + (item.checked ? 'checked' : '') + '>'
                 + '<span class="checklist-board-item-text' + doneClass + '" data-board-id="' + board.id + '" data-item-id="' + item.id + '">' + escapeHtml(item.text) + '</span>'
                 + '<span class="checklist-board-item-meta">' + escapeHtml(item.addedBy) + ' · ' + timeStr + '</span>'

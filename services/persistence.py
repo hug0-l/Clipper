@@ -14,146 +14,106 @@ class Persistence:
     def __init__(self, db_path=DB_PATH):
         self.db_path = db_path
         self._lock = threading.Lock()
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA cache_size=-8000")
         self._init_db()
 
     def _init_db(self):
         """Create tables if they don't exist."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS admin (key TEXT PRIMARY KEY, value TEXT)"
-            )
-            conn.execute(
-                """CREATE TABLE IF NOT EXISTS room_data (
-                room_id TEXT PRIMARY KEY,
-                data TEXT  -- JSON blob of {noticePosts, checklists, chatMessages, keyManagements, ...}
-            )"""
-            )
-            conn.execute(
-                """CREATE TABLE IF NOT EXISTS config (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )"""
-            )
-            conn.execute(
-                """CREATE TABLE IF NOT EXISTS device_peers (
-                device_id TEXT PRIMARY KEY,
-                peer_id TEXT NOT NULL,
-                room_id TEXT DEFAULT '',
-                display_name TEXT DEFAULT '',
-                last_seen TEXT NOT NULL
-            )"""
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-    # --- Admin password ---
-
-    def init_admin_password(self, default_pw="12345"):
-        conn = sqlite3.connect(self.db_path)
-        try:
-            conn.execute(
-                "INSERT OR IGNORE INTO admin VALUES ('password', ?)",
-                (self._hash(default_pw),),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-    def verify_admin_password(self, pw):
-        conn = sqlite3.connect(self.db_path)
-        try:
-            row = conn.execute(
-                "SELECT value FROM admin WHERE key='password'"
-            ).fetchone()
-            if not row:
-                return False
-            return hmac.compare_digest(self._hash(pw), row[0])
-        finally:
-            conn.close()
-
-    def set_admin_password(self, new_pw):
-        conn = sqlite3.connect(self.db_path)
-        try:
-            conn.execute(
-                "INSERT OR REPLACE INTO admin VALUES ('password', ?)",
-                (self._hash(new_pw),),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-    @staticmethod
-    def _hash(pw):
-        return hashlib.sha256(pw.encode()).hexdigest()
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS room_data ("
+            "room_id TEXT PRIMARY KEY, data TEXT)"
+        )
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS device_peers ("
+            "device_id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, "
+            "room_id TEXT DEFAULT '', display_name TEXT DEFAULT '', "
+            "last_seen TEXT NOT NULL)"
+        )
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS plugin_data ("
+            "plugin TEXT, key TEXT, value TEXT, PRIMARY KEY(plugin, key))"
+        )
+        self._conn.commit()
 
     # --- Room data ---
 
     def save_room_data(self, room_id, room_data):
         """Persist a room's full data (notices, checklists, keys, chat)."""
-        conn = sqlite3.connect(self.db_path)
-        try:
+        with self._lock:
             blob = json.dumps(room_data, ensure_ascii=False)
-            conn.execute(
+            self._conn.execute(
                 "INSERT OR REPLACE INTO room_data VALUES (?, ?)", (room_id, blob)
             )
-            conn.commit()
-        finally:
-            conn.close()
+            self._conn.commit()
+
+    def save_many_rooms(self, room_dict):
+        """Persist multiple rooms in a single transaction."""
+        with self._lock:
+            with self._conn:
+                for rid, data in room_dict.items():
+                    blob = json.dumps(data, ensure_ascii=False)
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO room_data VALUES (?, ?)", (rid, blob)
+                    )
 
     def load_all_rooms(self):
         """Load all room data from DB. Returns {room_id: {data...}}."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            rows = conn.execute(
-                "SELECT room_id, data FROM room_data"
-            ).fetchall()
-            result = {}
-            for rid, blob in rows:
-                try:
-                    result[rid] = json.loads(blob)
-                except json.JSONDecodeError:
-                    continue
-            return result
-        finally:
-            conn.close()
+        rows = self._conn.execute(
+            "SELECT room_id, data FROM room_data"
+        ).fetchall()
+        result = {}
+        for rid, blob in rows:
+            try:
+                result[rid] = json.loads(blob)
+            except json.JSONDecodeError:
+                continue
+        return result
 
-    def delete_room(self, room_id):
-        conn = sqlite3.connect(self.db_path)
-        try:
-            conn.execute(
-                "DELETE FROM room_data WHERE room_id=?", (room_id,)
+    # --- Plugin key-value storage ---
+
+    def plugin_set(self, plugin_name, key, value):
+        """Store a plugin's key-value pair. Thread-safe."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO plugin_data VALUES (?,?,?)",
+                (plugin_name, key, json.dumps(value))
             )
-            conn.commit()
-        finally:
-            conn.close()
+            self._conn.commit()
 
-    # --- Config ---
+    def plugin_get(self, plugin_name, key, default=None):
+        """Retrieve a plugin's value by key."""
+        row = self._conn.execute(
+            "SELECT value FROM plugin_data WHERE plugin=? AND key=?",
+            (plugin_name, key)
+        ).fetchone()
+        if row:
+            return json.loads(row[0])
+        return default
 
-    def save_config(self, key, value):
-        conn = sqlite3.connect(self.db_path)
-        try:
-            conn.execute(
-                "INSERT OR REPLACE INTO config VALUES (?, ?)",
-                (key, json.dumps(value)),
+    def plugin_delete(self, plugin_name, key):
+        """Delete a plugin's key-value pair."""
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM plugin_data WHERE plugin=? AND key=?",
+                (plugin_name, key)
             )
-            conn.commit()
-        finally:
-            conn.close()
+            self._conn.commit()
 
-    def load_config(self, key, default=None):
-        conn = sqlite3.connect(self.db_path)
-        try:
-            row = conn.execute(
-                "SELECT value FROM config WHERE key=?", (key,)
-            ).fetchone()
-            if row:
-                return json.loads(row[0])
-            return default
-        finally:
-            conn.close()
+    def plugin_list(self, plugin_name):
+        """List all keys for a plugin."""
+        rows = self._conn.execute(
+            "SELECT key FROM plugin_data WHERE plugin=?", (plugin_name,)
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def plugin_clear(self, plugin_name):
+        """Clear all data for a plugin."""
+        with self._lock:
+            self._conn.execute("DELETE FROM plugin_data WHERE plugin=?", (plugin_name,))
+            self._conn.commit()
 
     # --- Device-Peer mapping (thread-safe) ---
 
@@ -161,29 +121,19 @@ class Persistence:
         """Look up a peer_id previously assigned to this device.
         Returns (peer_id, room_id, display_name) tuple, or None.
         """
-        with self._lock:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                row = conn.execute(
-                    "SELECT peer_id, room_id, display_name FROM device_peers WHERE device_id=?",
-                    (device_id,)
-                ).fetchone()
-                return row if row else None
-            finally:
-                conn.close()
+        row = self._conn.execute(
+            "SELECT peer_id, room_id, display_name FROM device_peers WHERE device_id=?",
+            (device_id,)
+        ).fetchone()
+        return row if row else None
 
     def save_device_peer(self, device_id, peer_id, room_id='', display_name=''):
-        """Save or update a device→peer mapping. Thread-safe."""
-        with self._lock:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                conn.execute(
-                    """INSERT OR REPLACE INTO device_peers
-                    (device_id, peer_id, room_id, display_name, last_seen)
-                    VALUES (?,?,?,?,?)""",
-                    (device_id, peer_id, room_id, display_name,
-                     datetime.now(timezone.utc).isoformat())
-                )
-                conn.commit()
-            finally:
-                conn.close()
+        """Save or update a device→peer mapping."""
+        self._conn.execute(
+            "INSERT OR REPLACE INTO device_peers "
+            "(device_id, peer_id, room_id, display_name, last_seen) "
+            "VALUES (?,?,?,?,?)",
+            (device_id, peer_id, room_id, display_name,
+             datetime.now(timezone.utc).isoformat())
+        )
+        self._conn.commit()

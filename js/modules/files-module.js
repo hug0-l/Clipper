@@ -456,6 +456,30 @@ class FilesModule extends ClipperModule {
             APP.showStatusMsg('已接收: ' + entry.name);
         }
 
+        // Image preview for common image types
+        const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(entry.name);
+        if (isImage) {
+            const previewUrl = URL.createObjectURL(blob);
+            const img = document.createElement('img');
+            img.src = previewUrl;
+            img.style.cssText = 'max-width:240px;max-height:180px;border-radius:8px;margin-top:6px;cursor:pointer;display:block;';
+            img.title = entry.name;
+            img.addEventListener('click', () => window.open(previewUrl, '_blank'));
+            // Append preview to file queue item
+            const queue = document.getElementById('fileQueue');
+            if (queue) {
+                const items = queue.querySelectorAll('.file-item');
+                for (const item of items) {
+                    if (item.querySelector('.file-name')?.textContent?.includes(entry.name)) {
+                        item.appendChild(img);
+                        break;
+                    }
+                }
+            }
+            // Revoke object URL after 60s
+            setTimeout(() => URL.revokeObjectURL(previewUrl), 60000);
+        }
+
         const a = document.createElement('a');
         a.href = url;
         a.download = entry.name;

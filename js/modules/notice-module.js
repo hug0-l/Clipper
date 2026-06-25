@@ -26,9 +26,16 @@ class NoticeModule extends ClipperModule {
     }
 
     _mount() {
-        const posts = loadFromStorage(APP.roomKey('vcc_notice_posts'), []);
+        var posts = loadFromStorage(APP.roomKey('vcc_notice_posts'), []);
         APP.state.noticePosts = posts;
         this.renderNoticeBoard();
+        var self = this;
+        ['btnNewPost', 'btnNewPostEmpty'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('click', function() { self.showNoticeForm(null); });
+        });
+        var sidebarBtn = document.getElementById('btnNewPostSidebar');
+        if (sidebarBtn) sidebarBtn.addEventListener('click', function() { self.showNoticeForm(null); });
     }
 
     _unmount() {
@@ -110,34 +117,7 @@ class NoticeModule extends ClipperModule {
 
     renderNoticeBoard() {
         this.renderCmsTable();
-
-        const sidebarList = document.getElementById('noticeListSidebar');
-        if (sidebarList) {
-            const sorted = [...APP.state.noticePosts].sort((a, b) => {
-                if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-                return b.timestamp - a.timestamp;
-            });
-            if (sorted.length === 0) {
-                sidebarList.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;font-size:14px">暫無公告</div>';
-                return;
-            }
-            sidebarList.innerHTML = sorted.map(post => {
-                const timeStr = new Date(post.timestamp).toLocaleString('zh-TW', {hour:'2-digit',minute:'2-digit'});
-                const catColor = this.getCategoryColor(post.category || '');
-                const catLabel = this.NOTICE_CATEGORIES.find(c => c.value === (post.category || ''))?.label || '';
-                const categoryBadge = catLabel ? '<span class="category-badge" style="background:' + catColor + ';font-size:10px;padding:1px 6px;">' + escapeHtml(catLabel) + '</span>' : '';
-                const tagsHtml = (post.tags && post.tags.length) ? post.tags.slice(0,2).map(t => '<span class="tag-badge" style="font-size:9px;">' + escapeHtml(t) + '</span>').join('') : '';
-                return '<div class="notice-card' + (post.pinned ? ' pinned' : '') + '" style="border-left-color:' + catColor + ';padding:10px 12px;">'
-                    + '<div class="notice-card-header" style="margin-bottom:4px;">'
-                    + '<div class="notice-card-title" style="font-size:18px;">' + categoryBadge + escapeHtml(post.title) + '</div>'
-                    + (post.pinned ? '<span class="pin-badge" style="font-size:12px;">📌</span>' : '')
-                    + '</div>'
-                    + '<div class="notice-card-meta" style="font-size:11px;margin-bottom:2px;">' + escapeHtml(post.author) + ' · ' + timeStr + '</div>'
-                    + (tagsHtml ? '<div class="notice-card-meta">' + tagsHtml + '</div>' : '')
-                    + '<div class="notice-card-content">' + post.content + '</div>'
-                    + '</div>';
-            }).join('');
-        }
+        this.renderNoticeBoardSidebar();
     }
 
     getCmsFilteredPosts() {
@@ -242,7 +222,7 @@ class NoticeModule extends ClipperModule {
                 + (post.pinned ? '<span style="font-size:12px;">📌</span>' : '')
                 + '</div>'
                 + '<div style="font-size:11px;color:#64748b;">' + escapeHtml(post.author) + ' · ' + timeStr + '</div>'
-                + '<div class="notice-card-content">' + post.content + '</div>'
+                + '<div class="notice-card-content">' + (typeof sanitizeHtml === 'function' ? sanitizeHtml(post.content) : post.content) + '</div>'
                 + '</div>';
         }).join('');
     }

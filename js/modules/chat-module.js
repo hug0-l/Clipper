@@ -280,13 +280,11 @@ class ChatModule extends ClipperModule {
             innerHtml += '<div class="msg-quote"><div class="quote-from">↩ ' + escapeHtml(replyFrom) + '</div><div class="quote-text">' + escapeHtml(replyTo.text) + '</div></div>';
         }
 
-        // Body text
         innerHtml += '<div class="msg-body">' + escapeHtml(text) + '</div>';
 
         if (!isSelf) {
             const { hue, light, dark } = this._userColor(from);
             div.style.setProperty('--msg-bg-dark', dark);
-            // Footer for others: time on left
             innerHtml = '<div class="chat-msg-avatar-header"><span class="msg-avatar" style="background:' + light + '">' + escapeHtml(displayFrom.charAt(0)) + '</span><span class="msg-avatar-name" style="color:' + light + '">' + escapeHtml(displayFrom) + '</span></div>'
                 + innerHtml
                 + '<div class="msg-footer other"><span class="msg-time">' + timeStr + '</span></div>';
@@ -294,17 +292,16 @@ class ChatModule extends ClipperModule {
             const { hue, light } = this._userColor(from);
             const entry = msgId ? APP.state.sentMessages.get(msgId) : null;
             const tick = entry ? '<span class="msg-tick' + (entry.acks.size >= entry.totalPeers ? ' delivered' : ' sent') + '">' + (entry.acks.size >= entry.totalPeers ? '✓✓' : '✓') + '</span>' : '';
-            // Footer for self: time + tick on right
             innerHtml += '<div class="msg-footer self"><span class="msg-time">' + timeStr + '</span>' + tick + '</div>';
         }
 
         innerHtml += '<div class="chat-msg-actions">'
             + '<button class="chat-msg-btn" data-action="reply" title="回覆">↩</button>'
-            + '<button class="chat-msg-btn" data-action="menu" title="更多">⋯</button>'
-            + '<div class="chat-msg-menu" data-menu-for="' + (msgId || '') + '">'
+            + (isSelf ? '<button class="chat-msg-btn" data-action="menu" title="更多">⋯</button>' : '')
+            + ((isSelf && msgId) ? '<div class="chat-msg-menu" data-menu-for="' + msgId + '">'
             + '<div class="chat-msg-menu-item" data-action="edit-msg">✏️ 編輯</div>'
             + '<div class="chat-msg-menu-item danger" data-action="delete-msg">🗑 刪除</div>'
-            + '</div></div>';
+            + '</div>' : '') + '</div>';
 
         div.innerHTML = innerHtml;
         container.appendChild(div);
@@ -346,6 +343,7 @@ class ChatModule extends ClipperModule {
                 this._deleteChatMessage(msgId);
             });
         }
+
 
         if (!div._menuClickListener) {
             div._menuClickListener = (e) => {
@@ -411,22 +409,65 @@ class ChatModule extends ClipperModule {
         }
         const el = document.querySelector('[data-msgid="' + msgId + '"]');
         if (!el) return;
-        const textDiv = el.querySelector('.msg-text');
-        if (!textDiv) return;
-        const currentText = textDiv.textContent;
-        const newText = prompt('編輯訊息：', currentText);
-        if (newText === null || newText.trim() === '' || newText.trim() === currentText) return;
-        const trimmed = newText.trim();
-        textDiv.textContent = trimmed;
-        let editedLabel = el.querySelector('.msg-edited');
-        if (!editedLabel) {
-            editedLabel = document.createElement('span');
-            editedLabel.className = 'msg-edited';
-            el.querySelector('.msg-time')?.appendChild(editedLabel);
-        }
-        editedLabel.textContent = ' (已編輯)';
-        broadcastToPeers(JSON.stringify({ type: 'chat-edit', msgId, newText: trimmed }));
-        APP.showStatusMsg('✅ 訊息已編輯');
+        const bodyDiv = el.querySelector('.msg-body');
+        if (!bodyDiv) return;
+        const currentText = bodyDiv.textContent;
+
+        // Inline contenteditable
+        bodyDiv.contentEditable = 'true';
+        bodyDiv.focus();
+        // Select all text
+        const range = document.createRange();
+        range.selectNodeContents(bodyDiv);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        const finishEdit = () => {
+            bodyDiv.contentEditable = 'false';
+            const newText = bodyDiv.textContent.trim();
+            if (!newText || newText === currentText) {
+                bodyDiv.textContent = currentText;
+                return;
+            }
+            let editedLabel = el.querySelector('.msg-edited');
+            if (!editedLabel) {
+                editedLabel = document.createElement('span');
+                editedLabel.className = 'msg-edited';
+                el.querySelector('.msg-time')?.appendChild(editedLabel);
+            }
+            editedLabel.textContent = ' (已編輯)';
+            broadcastToPeers(JSON.stringify({ type: 'chat-edit', msgId, newText }));
+            APP.showStatusMsg('✅ 訊息已編輯');
+        };
+
+        const onKey = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                bodyDiv.removeEventListener('keydown', onKey);
+                bodyDiv.removeEventListener('blur', onBlur);
+                finishEdit();
+                window.getSelection().removeAllRanges();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                bodyDiv.removeEventListener('keydown', onKey);
+                bodyDiv.removeEventListener('blur', onBlur);
+                bodyDiv.contentEditable = 'false';
+                bodyDiv.textContent = currentText;
+            }
+        };
+        const onBlur = () => {
+            bodyDiv.removeEventListener('keydown', onKey);
+            // Small delay so click on other elements doesn't cancel prematurely
+            setTimeout(() => {
+                if (bodyDiv.contentEditable === 'true') {
+                    bodyDiv.contentEditable = 'false';
+                    finishEdit();
+                }
+            }, 150);
+        };
+        bodyDiv.addEventListener('keydown', onKey);
+        bodyDiv.addEventListener('blur', onBlur);
     }
 
     async _deleteChatMessage(msgId) {
@@ -453,15 +494,33 @@ class ChatModule extends ClipperModule {
     _searchChat(query) {
         const container = this._id(this._opts.messagesId);
         if (!container) return;
-        const msgs = container.querySelectorAll('.chat-msg');
-        if (!query || !query.trim()) {
-            msgs.forEach(el => el.style.display = '');
-            return;
-        }
-        const q = query.trim().toLowerCase();
-        msgs.forEach(el => {
+        const q = (query || '').trim();
+        // Restore original text first
+        container.querySelectorAll('.chat-msg').forEach(el => {
+            el.style.display = '';
+            el.querySelectorAll('mark.chat-highlight').forEach(m => {
+                m.replaceWith(m.textContent);
+            });
+        });
+        if (!q) return;
+        const qLower = q.toLowerCase();
+        container.querySelectorAll('.chat-msg').forEach(el => {
             const text = (el.textContent || '').toLowerCase();
-            el.style.display = text.includes(q) ? '' : 'none';
+            if (!text.includes(qLower)) {
+                el.style.display = 'none';
+                return;
+            }
+            // Highlight matching text in .msg-body
+            el.querySelectorAll('.msg-body').forEach(body => {
+                const original = body.textContent;
+                const idx = original.toLowerCase().indexOf(qLower);
+                if (idx >= 0) {
+                    const before = original.slice(0, idx);
+                    const match = original.slice(idx, idx + q.length);
+                    const after = original.slice(idx + q.length);
+                    body.innerHTML = escapeHtml(before) + '<mark class="chat-highlight">' + escapeHtml(match) + '</mark>' + escapeHtml(after);
+                }
+            });
         });
     }
 
@@ -554,6 +613,8 @@ class ChatModule extends ClipperModule {
         if (sch && this._searchKeyHandler) sch.removeEventListener('keydown', this._searchKeyHandler);
         const rcl = this._id(this._opts.replyCloseId);
         if (rcl && this._replyCloseHandler) rcl.removeEventListener('click', this._replyCloseHandler);
+        if (this._typingTimer) clearTimeout(this._typingTimer);
+        if (this._typingStopTimer) clearTimeout(this._typingStopTimer);
     }
 
     // ── Helpers ──
